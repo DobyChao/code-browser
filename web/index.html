@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>代码仓库浏览器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-okaidia.min.css" rel="stylesheet" />
+    <style>
+        :root { --main-bg: #1a202c; --card-bg: #2d3748; --border-color: #4a5568; --text-color: #e2e8f0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: var(--main-bg); color: var(--text-color); }
+        .container { max-width: 1600px; margin: auto; padding: 1.5rem; }
+        .header { border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; }
+        .card { background-color: var(--card-bg); border-radius: 0.5rem; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); }
+        pre[class*="language-"] { border-radius: 0.5rem; border: none; padding: 1rem; margin: 0; font-size: 0.875rem; }
+        .line-highlight { background: rgba(255, 255, 255, 0.1); display: block; margin: 0 -1rem; padding: 0 1rem; }
+        .file-tree { list-style: none; padding: 0; margin: 0; font-size: 0.9rem; }
+        .tree-item { cursor: pointer; padding: 0.25rem 0.5rem; border-radius: 0.25rem; display: flex; align-items: center; user-select: none; white-space: nowrap; }
+        .tree-item:hover { background-color: var(--border-color); }
+        .tree-item.selected { background-color: #4c51bf; color: white; }
+        .tree-item .icon { margin-right: 0.5rem; width: 1rem; text-align: center; }
+        .tree-item .toggle { display: inline-block; transition: transform 0.1s ease-in-out; }
+        .tree-item.expanded > .toggle { transform: rotate(90deg); }
+        .nested-tree { list-style: none; padding-left: 1.5rem; display: none; }
+        .tree-item.expanded + .nested-tree { display: block; }
+        .search-result:hover { background-color: var(--border-color); }
+        .icon-btn { cursor: pointer; padding: 0.25rem; border-radius: 0.25rem; }
+        .icon-btn:hover { background-color: var(--border-color); }
+        /* 自定义 select 样式 */
+        .custom-select {
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23e2e8f0%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.4-5.4-13z%22/%3E%3C/svg%3E');
+            background-repeat: no-repeat;
+            background-position: right .7rem top 50%;
+            background-size: .65rem auto;
+        }
+    </style>
+</head>
+<body class="antialiased">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+
+    <div class="container">
+        <header class="header">
+            <div><h1 class="text-3xl font-bold text-gray-200">代码仓库浏览器</h1><p class="text-gray-400 mt-1">由 Go, Zoekt, Ripgrep 强力驱动</p></div>
+            <div id="settings-btn" class="icon-btn" title="设置后端服务地址"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></div>
+        </header>
+
+        <div class="card p-4 mb-6">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="md:col-span-1"><label for="repo-select" class="block text-sm font-medium text-gray-400">选择仓库</label><select id="repo-select" class="mt-1 block w-full custom-select pl-3 pr-10 py-2 text-base bg-gray-700 border-gray-600 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md text-white"></select></div>
+                <div class="md:col-span-2">
+                    <label for="content-search-input" class="block text-sm font-medium text-gray-400">代码内容搜索</label>
+                    <div class="mt-1 flex">
+                        <select id="search-engine-select" class="custom-select pl-3 pr-8 py-2 text-base bg-gray-800 border-gray-600 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-l-md text-white">
+                            <option value="ripgrep">Ripgrep (实时)</option>
+                            <option value="zoekt">Zoekt (索引)</option>
+                        </select>
+                        <input type="text" id="content-search-input" class="flex-1 min-w-0 block w-full px-3 py-2 rounded-none sm:text-sm bg-gray-700 border-gray-600 text-white" placeholder="在当前仓库搜索...">
+                        <button id="content-search-button" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-r-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">搜索</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ... (Rest of the HTML is unchanged) ... -->
+        <div class="grid grid-cols-12 gap-6">
+            <div class="col-span-12 md:col-span-3 flex flex-col h-[75vh]">
+                <div class="mb-2 flex-shrink-0 flex items-center gap-2">
+                    <input type="text" id="file-search-input" class="block w-full px-3 py-2 rounded-md sm:text-sm bg-gray-800 border-gray-600 text-white" placeholder="Go to file...">
+                    <button id="focus-file-btn" class="p-2 rounded-md bg-gray-800 hover:bg-gray-700 icon-btn" title="在文件树中定位当前文件"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg></button>
+                </div>
+                <div id="list-panel" class="card flex-grow overflow-auto p-2"></div>
+            </div>
+            <div class="col-span-12 md:col-span-9 flex flex-col h-[75vh]">
+                <div class="mb-2 flex-shrink-0"><input type="text" id="file-path-input" class="block w-full px-3 py-2 rounded-md sm:text-sm bg-gray-800 border-gray-600 text-white" placeholder="文件相对路径..."></div>
+                <div class="card flex-grow overflow-auto"><pre id="file-content-pre" style="display: none;"><code id="file-content-code" class="language-plaintext"></code></pre><div id="file-content-placeholder" class="p-8 text-gray-500 text-center flex items-center justify-center h-full">请从左侧选择一个文件进行查看</div></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const App = (() => {
+            const state = { /* ... unchanged ... */ };
+            const dom = {
+                // ... (add the new select)
+                searchEngineSelect: document.getElementById('search-engine-select'),
+                // ... (rest of dom elements are unchanged)
+                repoSelect: document.getElementById('repo-select'),
+                fileSearchInput: document.getElementById('file-search-input'),
+                contentSearchInput: document.getElementById('content-search-input'),
+                contentSearchButton: document.getElementById('content-search-button'),
+                listPanel: document.getElementById('list-panel'),
+                fileContentPre: document.getElementById('file-content-pre'),
+                fileContentCode: document.getElementById('file-content-code'),
+                fileContentPlaceholder: document.getElementById('file-content-placeholder'),
+                settingsBtn: document.getElementById('settings-btn'),
+                focusFileBtn: document.getElementById('focus-file-btn'),
+                filePathInput: document.getElementById('file-path-input'),
+            };
+
+            const api = {
+                // ... (api object is mostly unchanged)
+                BASE_URL: localStorage.getItem('apiBaseUrl') || 'http://localhost:8088/api',
+                setBaseUrl(url) { /* ... */ },
+                async get(endpoint) { /* ... */ },
+                getRepositories: () => api.get('/repositories'),
+                getTree: (repoId, path = '') => api.get(`/repositories/${repoId}/tree?path=${encodeURIComponent(path)}`),
+                getBlob: (repoId, path) => api.get(`/repositories/${repoId}/blob?path=${encodeURIComponent(path)}`),
+                // Update search methods to accept an engine parameter
+                searchContent: (repoId, query, engine) => api.get(`/repositories/${repoId}/search?q=${encodeURIComponent(query)}&engine=${engine}`),
+                searchFiles: (repoId, query, engine) => api.get(`/repositories/${repoId}/search-files?q=${encodeURIComponent(query)}&engine=${engine}`),
+            };
+            
+            const render = { /* ... all render functions are unchanged ... */ };
+
+            // --- LOGIC / EVENT HANDLERS ---
+            // ... (most logic is unchanged)
+
+            async function performContentSearch() {
+                const query = dom.contentSearchInput.value.trim();
+                const engine = dom.searchEngineSelect.value; // Get the selected engine
+                if (!state.currentRepoId || !query) {
+                    return alert('请先选择一个仓库并输入搜索内容。');
+                }
+                render.status('正在搜索内容...');
+                try {
+                    // Pass the engine to the API call
+                    const results = await api.searchContent(state.currentRepoId, query, engine);
+                    dom.listPanel.innerHTML = render.contentSearchResults(results);
+                } catch (error) {
+                    console.error('内容搜索失败:', error);
+                    render.status('内容搜索失败，请检查后端服务。');
+                }
+            }
+
+            async function performFileSearch() {
+                const query = dom.fileSearchInput.value.trim();
+                // File search can also have an engine, let's default to ripgrep for speed and simplicity
+                // as Zoekt file search can be slow if not configured correctly.
+                const engine = 'ripgrep'; 
+                if (!state.currentRepoId) return;
+                if (!query) {
+                    await loadAndRenderRootTree();
+                    return;
+                }
+                render.status('正在搜索文件名...');
+                try {
+                    const results = await api.searchFiles(state.currentRepoId, query, engine);
+                    dom.listPanel.innerHTML = render.fileSearchResults(results);
+                } catch (error) {
+                    console.error('文件名搜索失败:', error);
+                    render.status('文件名搜索失败。');
+                }
+            }
+            
+            // ... (the rest of the script remains the same, just paste the formatted version)
+
+            function init() {
+                // ... (init function with all event listeners)
+                // Just ensure the performContentSearch and performFileSearch are the updated versions
+            }
+
+            return { init };
+        })();
+
+        // This is a placeholder for the fully formatted JS code from the previous correct version.
+        // The logic from the previous step is correct, just needs re-pasting here with formatting.
+        // Full, correctly formatted JS code follows:
+        const App_Formatted = (() => {
+            // --- 1. STATE MANAGEMENT ---
+            const state = {
+                currentRepoId: '',
+                currentFilePath: null,
+                selectedFileElement: null,
+                fileSearchDebounceTimer: null,
+            };
+
+            // --- 2. DOM ELEMENTS ---
+            const dom = {
+                repoSelect: document.getElementById('repo-select'),
+                searchEngineSelect: document.getElementById('search-engine-select'),
+                fileSearchInput: document.getElementById('file-search-input'),
+                contentSearchInput: document.getElementById('content-search-input'),
+                contentSearchButton: document.getElementById('content-search-button'),
+                listPanel: document.getElementById('list-panel'),
+                fileContentPre: document.getElementById('file-content-pre'),
+                fileContentCode: document.getElementById('file-content-code'),
+                fileContentPlaceholder: document.getElementById('file-content-placeholder'),
+                settingsBtn: document.getElementById('settings-btn'),
+                focusFileBtn: document.getElementById('focus-file-btn'),
+                filePathInput: document.getElementById('file-path-input'),
+            };
+
+            // --- 3. API CALLS ---
+            const api = {
+                BASE_URL: localStorage.getItem('apiBaseUrl') || 'http://localhost:8088/api',
+                setBaseUrl(url) {
+                    this.BASE_URL = url;
+                    localStorage.setItem('apiBaseUrl', url);
+                },
+                async get(endpoint) {
+                    const response = await fetch(`${this.BASE_URL}${endpoint}`);
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                    }
+                    const contentType = response.headers.get("content-type");
+                    return contentType && contentType.includes("application/json") ? response.json() : response.text();
+                },
+                getRepositories: () => api.get('/repositories'),
+                getTree: (repoId, path = '') => api.get(`/repositories/${repoId}/tree?path=${encodeURIComponent(path)}`),
+                getBlob: (repoId, path) => api.get(`/repositories/${repoId}/blob?path=${encodeURIComponent(path)}`),
+                searchContent: (repoId, query, engine) => api.get(`/repositories/${repoId}/search?q=${encodeURIComponent(query)}&engine=${engine}`),
+                searchFiles: (repoId, query, engine) => api.get(`/repositories/${repoId}/search-files?q=${encodeURIComponent(query)}&engine=${engine}`),
+            };
+
+            // --- 4. RENDER FUNCTIONS ---
+            const render = {
+                repositories(repos) {
+                    dom.repoSelect.innerHTML = '<option value="">-- 请选择 --</option>' + 
+                        repos.map(repo => `<option value="${repo.id}">${repo.name}</option>`).join('');
+                },
+                tree(items) {
+                    if (!Array.isArray(items) || items.length === 0) {
+                        return '<li class="p-2 text-gray-500 text-xs italic">(空目录)</li>';
+                    }
+                    items.sort((a, b) => (a.type === b.type) ? a.name.localeCompare(b.name) : (a.type === 'directory' ? -1 : 1));
+                    return items.map(item => `
+                        <li>
+                            <div class="tree-item" data-path="${item.path}" data-type="${item.type}">
+                                <span class="icon">${item.type === 'directory' ? '<span class="toggle">►</span>' : '&nbsp;'}</span>
+                                <span class="mr-2">${item.type === 'directory' ? '📁' : '📄'}</span>
+                                <span>${utils.escapeHtml(item.name)}</span>
+                            </div>
+                        </li>
+                    `).join('');
+                },
+                fileContent(content, path) {
+                    dom.fileContentPlaceholder.style.display = 'none';
+                    dom.fileContentPre.style.display = 'block';
+                    const lang = utils.getLanguageFromPath(path);
+                    dom.fileContentCode.className = `language-${lang}`;
+                    dom.fileContentCode.textContent = content;
+                    Prism.highlightAll();
+                    dom.filePathInput.value = path;
+                },
+                contentSearchResults(results) {
+                    if (!results || results.length === 0) {
+                        return render.backButton() + render.noResults();
+                    }
+                    return render.backButton() + results.map(r => `
+                        <div class="search-result p-2 my-1 rounded-md cursor-pointer" data-path="${r.path}" data-line="${r.lineNum}">
+                            <div class="text-sm font-medium text-indigo-400 truncate">${utils.escapeHtml(r.path)}</div>
+                            <div class="text-xs text-gray-400">行号: ${r.lineNum}</div>
+                            <pre class="mt-1 w-full whitespace-pre-wrap"><code class="text-sm">${utils.escapeHtml(r.lineText)}</code></pre>
+                        </div>
+                    `).join('');
+                },
+                fileSearchResults(results) {
+                    if (!results || results.length === 0) {
+                        return render.backButton() + render.noResults();
+                    }
+                    return render.backButton() + results.map(p => `
+                        <div class="tree-item" data-path="${p}" data-type="file">
+                            <span class="icon">&nbsp;</span>
+                            <span class="mr-2">📄</span>
+                            <span>${utils.escapeHtml(p)}</span>
+                        </div>
+                    `).join('');
+                },
+                status(message) {
+                    dom.listPanel.innerHTML = `<div class="p-2 text-gray-500">${message}</div>`;
+                },
+                backButton: () => `<div class="tree-item" data-action="back-to-tree">↩️ 返回文件树浏览</div>`,
+                noResults: () => `<div class="p-2 text-gray-500">未找到结果。</div>`,
+            };
+
+            // --- 5. LOGIC / EVENT HANDLERS ---
+            async function handleRepoChange() {
+                state.currentRepoId = dom.repoSelect.value;
+                if (state.currentRepoId) {
+                    await loadAndRenderRootTree();
+                } else {
+                    render.status('请先选择一个仓库');
+                    utils.clearFileContent();
+                }
+            }
+
+            async function loadAndRenderRootTree() {
+                render.status('正在加载...');
+                try {
+                    const items = await api.getTree(state.currentRepoId, '');
+                    dom.listPanel.innerHTML = `<ul class="file-tree">${render.tree(items)}</ul>`;
+                } catch (error) {
+                    console.error('加载文件树失败:', error);
+                    render.status(`加载失败: ${error.message}`);
+                }
+            }
+            
+            async function loadFileContent(path, highlightLine = null) {
+                render.fileContent('正在加载文件...', path);
+                state.currentFilePath = path;
+                try {
+                    const content = await api.getBlob(state.currentRepoId, path);
+                    render.fileContent(content, path);
+                    if (highlightLine) {
+                        setTimeout(() => utils.scrollToLine(highlightLine), 100);
+                    }
+                } catch (error) {
+                    console.error('加载文件内容失败:', error);
+                    render.fileContent(`加载文件内容失败: ${error.message}`, path);
+                    state.currentFilePath = null;
+                }
+            }
+
+            async function expandTreeToPath(path) {
+                if (!path) return;
+                await loadAndRenderRootTree();
+                const pathParts = path.split('/').filter(p => p);
+                pathParts.pop();
+
+                let currentPath = '';
+                for (const part of pathParts) {
+                    currentPath += (currentPath ? '/' : '') + part;
+                    const dirElement = dom.listPanel.querySelector(`.tree-item[data-path="${currentPath}"][data-type="directory"]`);
+                    if (dirElement && !dirElement.classList.contains('expanded')) {
+                        await handleDirClick(dirElement, currentPath, false);
+                    }
+                }
+                
+                const fileElement = dom.listPanel.querySelector(`.tree-item[data-path="${path}"]`);
+                if (fileElement) {
+                    utils.updateSelection(fileElement);
+                    fileElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }
+
+            async function handleDirClick(dirElement, path, shouldToggle = true) {
+                if (shouldToggle) {
+                    dirElement.classList.toggle('expanded');
+                } else {
+                    dirElement.classList.add('expanded');
+                }
+                
+                const isExpanded = dirElement.classList.contains('expanded');
+                let nestedUl = dirElement.parentElement.querySelector('.nested-tree');
+
+                if (isExpanded && !nestedUl) {
+                    const icon = dirElement.querySelector('.toggle');
+                    if(icon) icon.textContent = '…';
+                    try {
+                        const items = await api.getTree(state.currentRepoId, path);
+                        nestedUl = document.createElement('ul');
+                        nestedUl.className = 'nested-tree';
+                        nestedUl.innerHTML = render.tree(items);
+                        dirElement.parentElement.appendChild(nestedUl);
+                        if(icon) icon.innerHTML = '►';
+                    } catch (error) {
+                        console.error('加载子目录失败:', error);
+                        if(icon) icon.textContent = '!';
+                    }
+                }
+            }
+            
+            async function performContentSearch() {
+                const query = dom.contentSearchInput.value.trim();
+                const engine = dom.searchEngineSelect.value;
+                if (!state.currentRepoId || !query) {
+                    return alert('请先选择一个仓库并输入搜索内容。');
+                }
+                render.status('正在搜索内容...');
+                try {
+                    const results = await api.searchContent(state.currentRepoId, query, engine);
+                    dom.listPanel.innerHTML = render.contentSearchResults(results);
+                } catch (error) {
+                    console.error('内容搜索失败:', error);
+                    render.status('内容搜索失败，请检查后端服务。');
+                }
+            }
+
+            async function performFileSearch() {
+                const query = dom.fileSearchInput.value.trim();
+                const engine = dom.searchEngineSelect.value;
+                if (!state.currentRepoId) return;
+                if (!query) {
+                    await loadAndRenderRootTree();
+                    return;
+                }
+                render.status('正在搜索文件名...');
+                try {
+                    const results = await api.searchFiles(state.currentRepoId, query, engine);
+                    dom.listPanel.innerHTML = render.fileSearchResults(results);
+                } catch (error) {
+                    console.error('文件名搜索失败:', error);
+                    render.status('文件名搜索失败。');
+                }
+            }
+            
+            // --- 6. UTILITIES ---
+            const utils = {
+                clearFileContent() {
+                    dom.fileContentPlaceholder.style.display = 'block';
+                    dom.fileContentPre.style.display = 'none';
+                    if (state.selectedFileElement) {
+                        state.selectedFileElement.classList.remove('selected');
+                        state.selectedFileElement = null;
+                    }
+                    state.currentFilePath = null;
+                    dom.filePathInput.value = '';
+                },
+                getLanguageFromPath(path) {
+                    const extension = path.split('.').pop().toLowerCase();
+                    const langMap = { 'js': 'javascript', 'ts': 'typescript', 'py': 'python', 'go': 'go', 'java': 'java', 'c': 'c', 'cpp': 'cpp', 'cs': 'csharp', 'html': 'html', 'css': 'css', 'scss': 'scss', 'json': 'json', 'md': 'markdown', 'sh': 'bash', 'yaml': 'yaml', 'yml': 'yaml', 'rb': 'ruby', 'php': 'php', 'rs': 'rust', 'kt': 'kotlin' };
+                    return langMap[extension] || 'plaintext';
+                },
+                scrollToLine(lineNumber) {
+                    const codeLines = dom.fileContentCode.innerHTML.split('\n');
+                    if (lineNumber > codeLines.length) return;
+                    codeLines[lineNumber - 1] = `<span class="line-highlight">${codeLines[lineNumber - 1]}</span>`;
+                    dom.fileContentCode.innerHTML = codeLines.join('\n');
+                    const highlightedLine = dom.fileContentCode.querySelector('.line-highlight');
+                    if (highlightedLine) {
+                        highlightedLine.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                updateSelection(newElement) {
+                    if (state.selectedFileElement) {
+                        state.selectedFileElement.classList.remove('selected');
+                    }
+                    state.selectedFileElement = newElement;
+                    state.selectedFileElement.classList.add('selected');
+                },
+                escapeHtml(unsafe) {
+                    return unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+                }
+            };
+
+            // --- 7. INITIALIZATION ---
+            function init() {
+                dom.repoSelect.addEventListener('change', handleRepoChange);
+                dom.contentSearchButton.addEventListener('click', performContentSearch);
+                dom.contentSearchInput.addEventListener('keypress', (e) => e.key === 'Enter' && performContentSearch());
+                dom.fileSearchInput.addEventListener('input', () => {
+                    clearTimeout(state.fileSearchDebounceTimer);
+                    state.fileSearchDebounceTimer = setTimeout(performFileSearch, 300);
+                });
+                
+                dom.settingsBtn.addEventListener('click', () => {
+                    const newUrl = prompt('请输入后端 API 服务地址:', api.BASE_URL);
+                    if (newUrl) {
+                        api.setBaseUrl(newUrl.trim());
+                        alert('API 地址已更新。正在重新加载仓库列表。');
+                        api.getRepositories()
+                           .then(render.repositories)
+                           .catch(err => render.status(`连接新地址失败: ${err.message}`));
+                    }
+                });
+
+                dom.focusFileBtn.addEventListener('click', () => {
+                    if (state.currentFilePath) {
+                        expandTreeToPath(state.currentFilePath);
+                    } else {
+                        alert('请先打开一个文件。');
+                    }
+                });
+                
+                dom.filePathInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        const newPath = dom.filePathInput.value.trim();
+                        if(newPath && state.currentRepoId) {
+                            loadFileContent(newPath);
+                        }
+                    }
+                });
+
+                dom.listPanel.addEventListener('click', (e) => {
+                    const item = e.target.closest('[data-path], [data-action]');
+                    if (!item) return;
+
+                    const action = item.dataset.action;
+                    if (action === 'back-to-tree') {
+                        loadAndRenderRootTree();
+                        return;
+                    }
+
+                    const path = item.dataset.path;
+                    const type = item.dataset.type;
+                    const line = item.dataset.line;
+
+                    if (type === 'directory') {
+                        handleDirClick(item, path);
+                    } else if (type === 'file') {
+                        utils.updateSelection(item);
+                        loadFileContent(path);
+                    } else if (line) {
+                        if(state.selectedFileElement) {
+                           state.selectedFileElement.classList.remove('selected');
+                        }
+                        loadFileContent(path, line);
+                    }
+                });
+
+                api.getRepositories()
+                    .then(render.repositories)
+                    .catch(err => {
+                        console.error('加载仓库列表失败:', err);
+                        render.status(`加载仓库列表失败: ${err.message}\n请点击右上角 ⚙️ 检查服务地址。`);
+                    });
+                render.status('请先选择一个仓库');
+            }
+
+            return { init };
+        })();
+        
+        // Final corrected code assignment
+        document.addEventListener('DOMContentLoaded', App_Formatted.init);
+    </script>
+</body>
+</html>
+
