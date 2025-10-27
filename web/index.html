@@ -36,6 +36,13 @@
             background-position: right .7rem top 50%;
             background-size: .65rem auto;
         }
+        /* ★★★ 新增样式 ★★★: 用于高亮搜索片段 */
+        .search-highlight {
+            background-color: #fcd34d; /* yellow-400 */
+            color: #1f2937; /* gray-800 */
+            border-radius: 0.125rem;
+            padding: 0 0.125rem;
+        }
     </style>
 </head>
 <body class="antialiased">
@@ -43,8 +50,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
 
     <div class="container">
+        <!-- ... (Header 和 Control Area 保持不变) ... -->
         <header class="header">
-            <div><h1 class="text-3xl font-bold text-gray-200">代码仓库浏览器</h1><p class="text-gray-400 mt-1">由 Go, Zoekt, Ripgrep 强力驱动</p></div>
+            <div><h1 class="text-3xl font-bold text-gray-200">代码仓库浏览器</h1></div>
             <div id="settings-btn" class="icon-btn" title="设置后端服务地址"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></div>
         </header>
 
@@ -55,8 +63,8 @@
                     <label for="content-search-input" class="block text-sm font-medium text-gray-400">代码内容搜索</label>
                     <div class="mt-1 flex">
                         <select id="search-engine-select" class="custom-select pl-3 pr-8 py-2 text-base bg-gray-800 border-gray-600 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-l-md text-white">
-                            <option value="ripgrep">Ripgrep (实时)</option>
                             <option value="zoekt">Zoekt (索引)</option>
+                            <option value="ripgrep">Ripgrep (实时)</option>
                         </select>
                         <input type="text" id="content-search-input" class="flex-1 min-w-0 block w-full px-3 py-2 rounded-none sm:text-sm bg-gray-700 border-gray-600 text-white" placeholder="在当前仓库搜索...">
                         <button id="content-search-button" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-r-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">搜索</button>
@@ -65,7 +73,7 @@
             </div>
         </div>
 
-        <!-- ... (Rest of the HTML is unchanged) ... -->
+        <!-- ... (Main Content Area 布局保持不变) ... -->
         <div class="grid grid-cols-12 gap-6">
             <div class="col-span-12 md:col-span-3 flex flex-col h-[75vh]">
                 <div class="mb-2 flex-shrink-0 flex items-center gap-2">
@@ -251,13 +259,18 @@
                     if (!results || results.length === 0) {
                         return render.backButton() + render.noResults();
                     }
-                    return render.backButton() + results.map(r => `
-                        <div class="search-result p-2 my-1 rounded-md cursor-pointer" data-path="${r.path}" data-line="${r.lineNum}">
+                    return render.backButton() + results.map(r => {
+                        // 使用新的 highlightFragments 辅助函数
+                        const highlightedText = utils.highlightFragments(r.lineText, r.fragments);
+                        return `
+                        <div class="search-result p-2 my-1 rounded-md cursor-pointer" data-path="${utils.escapeHtml(r.path)}" data-line="${r.lineNum}">
                             <div class="text-sm font-medium text-indigo-400 truncate">${utils.escapeHtml(r.path)}</div>
                             <div class="text-xs text-gray-400">行号: ${r.lineNum}</div>
-                            <pre class="mt-1 w-full whitespace-pre-wrap"><code class="text-sm">${utils.escapeHtml(r.lineText)}</code></pre>
+                            <!-- 使用 innerHTML 渲染高亮后的 HTML -->
+                            <pre class="mt-1 w-full whitespace-pre-wrap"><code class="text-sm">${highlightedText}</code></pre>
                         </div>
-                    `).join('');
+                        `;
+                    }).join('');
                 },
                 fileSearchResults(results) {
                     if (!results || results.length === 0) {
@@ -398,7 +411,7 @@
                     render.status('文件名搜索失败。');
                 }
             }
-            
+
             // --- 6. UTILITIES ---
             const utils = {
                 clearFileContent() {
@@ -434,7 +447,34 @@
                     state.selectedFileElement.classList.add('selected');
                 },
                 escapeHtml(unsafe) {
+                    if (unsafe === null || unsafe === undefined) return '';
                     return unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+                },
+
+                // ★★★ 新增辅助函数: 高亮片段 ★★★
+                highlightFragments(lineText, fragments) {
+                    const esc = utils.escapeHtml; // 别名
+                    if (!fragments || fragments.length === 0) {
+                        return esc(lineText);
+                    }
+                    
+                    // 按偏移量排序，确保我们按顺序处理
+                    fragments.sort((a, b) => a.offset - b.offset);
+                    
+                    let resultHtml = '';
+                    let lastIndex = 0;
+                    
+                    for (const frag of fragments) {
+                        // 添加匹配前的安全文本
+                        resultHtml += esc(lineText.substring(lastIndex, frag.offset));
+                        // 添加高亮的匹配文本
+                        resultHtml += `<span class="search-highlight">${esc(lineText.substring(frag.offset, frag.offset + frag.length))}</span>`;
+                        lastIndex = frag.offset + frag.length;
+                    }
+                    // 添加最后一个匹配后的剩余文本
+                    resultHtml += esc(lineText.substring(lastIndex));
+                    
+                    return resultHtml;
                 }
             };
 

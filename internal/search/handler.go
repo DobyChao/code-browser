@@ -2,88 +2,114 @@ package search
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"strconv" // Needed for parsing uint32 repoID
 
-	"code-browser/internal/config"
+	"code-browser/internal/repo"
 )
 
-// Handlers 是一个包含 search 服务所有 HTTP 处理器方法的结构体
-type Handlers struct{}
-
-// engines 是一个存储了所有可用搜索引擎实例的映射
-var engines = map[string]Engine{
-	"zoekt":   &ZoektEngine{ApiUrl: "http://localhost:6070/api"},
-	"ripgrep": &RipgrepEngine{},
+// Handlers 封装了所有与搜索相关的 HTTP 处理器
+type Handlers struct {
+	Engines      map[string]Engine // 搜索引擎实例映射
+	RepoProvider *repo.Provider    // 仓库服务实例，用于获取仓库信息
 }
 
-// getEngineFromRequest 从 HTTP 请求中获取 'engine' 参数并返回对应的搜索引擎实例
-func getEngineFromRequest(r *http.Request) (Engine, string) {
-	engineName := r.URL.Query().Get("engine")
-	if engine, ok := engines[engineName]; ok {
-		return engine, engineName
+// parseRepoIDHelper 从请求路径中解析 uint32 仓库 ID (辅助函数)
+func parseRepoIDHelper(r *http.Request) (uint32, error) {
+	idStr := r.PathValue("id")
+	idUint64, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("无效的仓库 ID 格式: '%s'", idStr)
 	}
-	// 默认返回 ripgrep
-	return engines["ripgrep"], "ripgrep"
+	return uint32(idUint64), nil
 }
 
 // SearchContent 处理代码内容的搜索请求
 func (h *Handlers) SearchContent(w http.ResponseWriter, r *http.Request) {
-	repoId := r.PathValue("repoId")
-	query := r.URL.Query().Get("q")
-	if query == "" {
-		http.Error(w, "查询参数 'q' 不能为空", http.StatusBadRequest)
-		return
-	}
-
-	repoPath := config.GetRepoPath(repoId)
-	if repoPath == "" {
-		http.Error(w, "未找到指定的仓库", http.StatusNotFound)
-		return
-	}
-
-	engine, engineName := getEngineFromRequest(r)
-	results, err := engine.SearchContent(repoId, repoPath, query)
-
+	repoID, err := parseRepoIDHelper(r)
 	if err != nil {
-		log.Printf("内容搜索失败 (engine: %s): %v", engineName, err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	query := r.URL.Query().Get("q")
+	engineName := r.URL.Query().Get("engine")
+
+	if query == "" {
+		http.Error(w, "Query parameter 'q' is required", http.StatusBadRequest)
+		return
+	}
+	engine, ok := h.Engines[engineName]
+	if !ok {
+		http.Error(w, fmt.Sprintf("Invalid search engine: %s. Available: %v", engineName, getMapKeys(h.Engines)), http.StatusBadRequest)
+		return
+	}
+
+	repoInfo, ok := h.RepoProvider.GetRepo(repoID)
+	if !ok {
+		http.Error(w, fmt.Sprintf("仓库 ID '%d' 未找到", repoID), http.StatusNotFound)
+		return
+	}
+
+	results, err := engine.SearchContent(repoInfo, query)
+	if err != nil {
+		log.Printf("内容搜索失败 (engine: %s, repo: %d): %v", engineName, repoID, err)
+		http.Error(w, fmt.Sprintf("Search failed: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(results); err != nil {
-		log.Printf("序列化 JSON 失败: %v", err)
+		log.Printf("序列化搜索结果失败: %v", err)
 	}
 }
 
-// SearchFiles 处理文件名的搜索请求
+// SearchFiles 处理文件名搜索请求
 func (h *Handlers) SearchFiles(w http.ResponseWriter, r *http.Request) {
-	repoId := r.PathValue("repoId")
-	query := r.URL.Query().Get("q")
-	if query == "" {
-		http.Error(w, "查询参数 'q' 不能为空", http.StatusBadRequest)
-		return
-	}
-
-	repoPath := config.GetRepoPath(repoId)
-	if repoPath == "" {
-		http.Error(w, "未找到指定的仓库", http.StatusNotFound)
-		return
-	}
-
-	engine, engineName := getEngineFromRequest(r)
-	results, err := engine.SearchFiles(repoId, repoPath, query)
-
+	repoID, err := parseRepoIDHelper(r)
 	if err != nil {
-		log.Printf("文件名搜索失败 (engine: %s): %v", engineName, err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	query := r.URL.Query().Get("q")
+	engineName := r.URL.Query().Get("engine")
+
+	if engineName == "" {
+		engineName = "ripgrep" // Default to ripgrep for file search
+	}
+
+	engine, ok := h.Engines[engineName]
+	if !ok {
+		http.Error(w, fmt.Sprintf("Invalid search engine: %s. Available: %v", engineName, getMapKeys(h.Engines)), http.StatusBadRequest)
+		return
+	}
+
+	repoInfo, ok := h.RepoProvider.GetRepo(repoID)
+	if !ok {
+		http.Error(w, fmt.Sprintf("仓库 ID '%d' 未找到", repoID), http.StatusNotFound)
+		return
+	}
+
+	results, err := engine.SearchFiles(repoInfo, query)
+	if err != nil {
+		log.Printf("文件名搜索失败 (engine: %s, repo: %d): %v", engineName, repoID, err)
+		http.Error(w, fmt.Sprintf("File search failed: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(results); err != nil {
-		log.Printf("序列化 JSON 失败: %v", err)
+		log.Printf("序列化文件结果失败: %v", err)
 	}
+}
+
+// getMapKeys 辅助函数，获取 map 的键
+func getMapKeys(m map[string]Engine) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 

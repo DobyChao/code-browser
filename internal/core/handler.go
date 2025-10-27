@@ -2,69 +2,93 @@ package core
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv" // Needed for parsing uint32 repoID
 	"strings"
 
-	"code-browser/internal/config"
+	"code-browser/internal/repo"
 )
 
-// Handlers 是一个包含 core 服务所有 HTTP 处理器方法的结构体
-type Handlers struct{}
-
-// FileInfo 定义了返回给前端的文件/目录信息的结构
-type FileInfo struct {
-	Name string `json:"name"`
-	Path string `json:"path"`
-	Type string `json:"type"` // "file" or "directory"
+// Handlers 封装了所有与核心浏览功能相关的 HTTP 处理器
+type Handlers struct {
+	RepoProvider *repo.Provider
 }
 
-// ListRepositories 处理获取所有已配置仓库列表的请求
+// ListRepositories 返回所有已配置的仓库列表
 func (h *Handlers) ListRepositories(w http.ResponseWriter, r *http.Request) {
-	repos := config.GetRepos()
-	
-	// 为了安全，我们只返回 id 和 name 给前端
-	type repoInfo struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-	}
-	
-	repoInfos := make([]repoInfo, len(repos))
-	for i, repo := range repos {
-		repoInfos[i] = repoInfo{ID: repo.ID, Name: repo.Name}
-	}
-
+	repos := h.RepoProvider.GetAll()
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(repoInfos); err != nil {
-		log.Printf("序列化仓库列表为 JSON 失败: %v", err)
+	if err := json.NewEncoder(w).Encode(repos); err != nil {
+		log.Printf("序列化仓库列表失败: %v", err)
+		http.Error(w, "无法序列化仓库列表", http.StatusInternalServerError)
 	}
 }
 
-// GetTree 处理获取指定仓库和路径下文件/目录列表的请求
+// parseRepoIDHelper 从请求路径中解析 uint32 仓库 ID (辅助函数)
+func parseRepoIDHelper(r *http.Request) (uint32, error) {
+	idStr := r.PathValue("id")
+	idUint64, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("无效的仓库 ID 格式: '%s'", idStr)
+	}
+	return uint32(idUint64), nil
+}
+
+// GetTree 返回指定仓库和路径下的文件/目录列表
 func (h *Handlers) GetTree(w http.ResponseWriter, r *http.Request) {
-	repoId := r.PathValue("repoId")
+	repoID, err := parseRepoIDHelper(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	relativePath := r.URL.Query().Get("path")
-	
-	basePath := config.GetRepoPath(repoId)
-	if basePath == "" {
-		http.Error(w, "未找到指定的仓库", http.StatusNotFound)
+
+	repoInfo, ok := h.RepoProvider.GetRepo(repoID)
+	if !ok {
+		http.Error(w, fmt.Sprintf("仓库 ID '%d' 未找到", repoID), http.StatusNotFound)
 		return
 	}
 
-	// 安全性检查：防止目录遍历攻击
-	targetPath := filepath.Join(basePath, relativePath)
-	if !strings.HasPrefix(filepath.Clean(targetPath), filepath.Clean(basePath)) {
-		http.Error(w, "禁止访问的路径", http.StatusForbidden)
+	targetPath := filepath.Join(repoInfo.SourcePath, relativePath)
+
+	absRepoPath, err := filepath.Abs(repoInfo.SourcePath)
+	if err != nil {
+		log.Printf("错误: 无法获取仓库 '%d' 的绝对路径 '%s': %v", repoID, repoInfo.SourcePath, err)
+		http.Error(w, "服务器内部错误 (获取仓库路径失败)", http.StatusInternalServerError)
+		return
+	}
+	absTargetPath, err := filepath.Abs(targetPath)
+	if err != nil {
+		log.Printf("警告: 无法规范化目标路径 '%s': %v", targetPath, err)
+		http.Error(w, "无效的目标路径", http.StatusBadRequest)
+		return
+	}
+	if !strings.HasPrefix(absTargetPath, absRepoPath) {
+		http.Error(w, "禁止访问", http.StatusForbidden)
 		return
 	}
 
 	entries, err := os.ReadDir(targetPath)
 	if err != nil {
 		log.Printf("读取目录失败 %s: %v", targetPath, err)
-		http.Error(w, "无法读取目录", http.StatusInternalServerError)
+		if os.IsNotExist(err) {
+			http.Error(w, "目录不存在", http.StatusNotFound)
+		} else if os.IsPermission(err) {
+			http.Error(w, "无权访问目录", http.StatusForbidden)
+		} else {
+			http.Error(w, "无法读取目录", http.StatusInternalServerError)
+		}
 		return
+	}
+
+	type FileInfo struct {
+		Name string `json:"name"`
+		Path string `json:"path"`
+		Type string `json:"type"`
 	}
 
 	var files []FileInfo
@@ -73,40 +97,75 @@ func (h *Handlers) GetTree(w http.ResponseWriter, r *http.Request) {
 		if entry.IsDir() {
 			fileType = "directory"
 		}
-		
-		// 构造相对于仓库根目录的路径
 		entryRelativePath := filepath.Join(relativePath, entry.Name())
-
 		files = append(files, FileInfo{
 			Name: entry.Name(),
-			Path: filepath.ToSlash(entryRelativePath), // 统一使用 / 作为路径分隔符
+			Path: filepath.ToSlash(entryRelativePath),
 			Type: fileType,
 		})
 	}
-	
-	// 保证即使目录为空也返回一个空数组 `[]` 而不是 `null`
+
 	if files == nil {
 		files = make([]FileInfo, 0)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(files)
+	if err := json.NewEncoder(w).Encode(files); err != nil {
+		log.Printf("序列化文件列表失败: %v", err)
+	}
 }
 
-// GetBlob 处理获取指定文件内容的请求
+// GetBlob 返回指定文件的原始内容
 func (h *Handlers) GetBlob(w http.ResponseWriter, r *http.Request) {
-	repoId := r.PathValue("repoId")
+	repoID, err := parseRepoIDHelper(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	relativePath := r.URL.Query().Get("path")
-	
-	basePath := config.GetRepoPath(repoId)
-	if basePath == "" {
-		http.Error(w, "未找到指定的仓库", http.StatusNotFound)
+	if relativePath == "" {
+		http.Error(w, "Query parameter 'path' is required", http.StatusBadRequest)
 		return
 	}
 
-	targetPath := filepath.Join(basePath, relativePath)
-	if !strings.HasPrefix(filepath.Clean(targetPath), filepath.Clean(basePath)) {
-		http.Error(w, "禁止访问的路径", http.StatusForbidden)
+	repoInfo, ok := h.RepoProvider.GetRepo(repoID)
+	if !ok {
+		http.Error(w, fmt.Sprintf("仓库 ID '%d' 未找到", repoID), http.StatusNotFound)
+		return
+	}
+
+	targetPath := filepath.Join(repoInfo.SourcePath, relativePath)
+
+	absRepoPath, _ := filepath.Abs(repoInfo.SourcePath)
+	absTargetPath, err := filepath.Abs(targetPath)
+	if err != nil {
+		log.Printf("警告: 无法规范化文件路径 '%s': %v", targetPath, err)
+		http.Error(w, "无效的文件路径", http.StatusBadRequest)
+		return
+	}
+	if !strings.HasPrefix(absTargetPath, absRepoPath) {
+		http.Error(w, "禁止访问", http.StatusForbidden)
+		return
+	}
+	if absTargetPath == absRepoPath { // Disallow reading root as blob
+		http.Error(w, "禁止读取仓库根目录作为文件", http.StatusForbidden)
+		return
+	}
+
+	fileInfo, err := os.Stat(targetPath)
+	if err != nil {
+		log.Printf("检查文件/目录 '%s' 失败: %v", targetPath, err)
+		if os.IsNotExist(err) {
+			http.Error(w, "文件不存在", http.StatusNotFound)
+		} else if os.IsPermission(err) {
+			http.Error(w, "无权访问文件", http.StatusForbidden)
+		} else {
+			http.Error(w, "无法访问文件", http.StatusInternalServerError)
+		}
+		return
+	}
+	if fileInfo.IsDir() {
+		http.Error(w, "路径是一个目录，无法读取内容", http.StatusBadRequest)
 		return
 	}
 
@@ -117,6 +176,12 @@ func (h *Handlers) GetBlob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	contentType := http.DetectContentType(content)
+	if strings.HasPrefix(contentType, "text/") || contentType == "application/octet-stream" {
+		contentType = "text/plain; charset=utf-8" // Default to text/plain for code files
+	}
+
+	w.Header().Set("Content-Type", contentType)
 	w.Write(content)
 }
+
