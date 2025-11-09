@@ -76,7 +76,8 @@ type ZoektFragment struct {
 
 // ZoektSearchOptions 定义了可以传递给 Zoekt 的搜索选项
 type ZoektSearchOptions struct {
-	TotalMaxMatchCount int `json:"TotalMaxMatchCount,omitempty"`
+	ShardMaxMatchCount int `json:"ShardMaxMatchCount,omitempty"`
+	MaxMatchDisplayCount int `json:"MaxMatchDisplayCount,omitempty"`
 }
 
 type zoektSearchRequest struct {
@@ -156,7 +157,7 @@ func (z *ZoektEngine) SearchContent(repo repo.Repository, query string) ([]Searc
 	payload := zoektSearchRequest{
 		Q:       query,
 		RepoIDs: []uint32{repo.RepoID},
-		Opts:    &ZoektSearchOptions{TotalMaxMatchCount: 1000},
+		Opts:    &ZoektSearchOptions{ShardMaxMatchCount: 500, MaxMatchDisplayCount: 500},
 	}
 
 	zoektResp, err := z.doZoektRequest(payload)
@@ -210,7 +211,7 @@ func (z *ZoektEngine) SearchFiles(repo repo.Repository, query string) ([]string,
 	payload := zoektSearchRequest{
 		Q:       fileQuery,
 		RepoIDs: []uint32{repo.RepoID},
-		Opts:    &ZoektSearchOptions{TotalMaxMatchCount: 1000},
+		Opts:    &ZoektSearchOptions{ShardMaxMatchCount: 500, MaxMatchDisplayCount: 500},
 	}
 
 	zoektResp, err := z.doZoektRequest(payload)
