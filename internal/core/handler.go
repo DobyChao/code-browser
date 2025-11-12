@@ -11,11 +11,13 @@ import (
 	"strings"
 
 	"code-browser/internal/repo"
+	"github.com/patrickmn/go-cache"
 )
 
 // Handlers 封装了所有与核心浏览功能相关的 HTTP 处理器
 type Handlers struct {
 	RepoProvider *repo.Provider
+	Cache        *cache.Cache
 }
 
 // ListRepositories 返回所有已配置的仓库列表
@@ -40,12 +42,24 @@ func parseRepoIDHelper(r *http.Request) (uint32, error) {
 
 // GetTree 返回指定仓库和路径下的文件/目录列表
 func (h *Handlers) GetTree(w http.ResponseWriter, r *http.Request) {
+	// 打印请求：
+	log.Printf("请求: %s %s", r.Method, r.URL.Path)
 	repoID, err := parseRepoIDHelper(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	relativePath := r.URL.Query().Get("path")
+	log.Printf("请求: relativePath: %s", relativePath)
+
+	// 尝试从缓存中获取结果
+	cacheKey := fmt.Sprintf("tree:%d:%s", repoID, relativePath)
+	if data, found := h.Cache.Get(cacheKey); found {
+		log.Printf("DEBUG: 缓存命中 (tree): %s", cacheKey)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(data)
+		return
+	}
 
 	repoInfo, ok := h.RepoProvider.GetRepo(repoID)
 	if !ok {
@@ -109,14 +123,25 @@ func (h *Handlers) GetTree(w http.ResponseWriter, r *http.Request) {
 		files = make([]FileInfo, 0)
 	}
 
+	// 缓存结果
+	h.Cache.Set(cacheKey, files, cache.DefaultExpiration)
+
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(files); err != nil {
 		log.Printf("序列化文件列表失败: %v", err)
 	}
 }
 
+// blobCacheEntry 定义了用于缓存文件内容的结构
+type blobCacheEntry struct {
+	Content     []byte
+	ContentType string
+}
+
 // GetBlob 返回指定文件的原始内容
 func (h *Handlers) GetBlob(w http.ResponseWriter, r *http.Request) {
+	// 打印请求：
+	log.Printf("请求: %s %s", r.Method, r.URL.Path)
 	repoID, err := parseRepoIDHelper(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -125,6 +150,16 @@ func (h *Handlers) GetBlob(w http.ResponseWriter, r *http.Request) {
 	relativePath := r.URL.Query().Get("path")
 	if relativePath == "" {
 		http.Error(w, "Query parameter 'path' is required", http.StatusBadRequest)
+		return
+	}
+
+	// 尝试从缓存中获取结果
+	cacheKey := fmt.Sprintf("blob:%d:%s", repoID, relativePath)
+	if data, found := h.Cache.Get(cacheKey); found {
+		log.Printf("DEBUG: 缓存命中 (blob): %s", cacheKey)
+		entry := data.(blobCacheEntry) // 从接口类型断言
+		w.Header().Set("Content-Type", entry.ContentType)
+		w.Write(entry.Content)
 		return
 	}
 
@@ -180,6 +215,10 @@ func (h *Handlers) GetBlob(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(contentType, "text/") || contentType == "application/octet-stream" {
 		contentType = "text/plain; charset=utf-8" // Default to text/plain for code files
 	}
+
+	// 将文件内容和类型存入缓存
+	entry := blobCacheEntry{Content: content, ContentType: contentType}
+	h.Cache.Set(cacheKey, entry, cache.DefaultExpiration)
 
 	w.Header().Set("Content-Type", contentType)
 	w.Write(content)

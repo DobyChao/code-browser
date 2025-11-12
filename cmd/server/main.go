@@ -9,6 +9,8 @@ import (
 	"code-browser/internal/core"
 	"code-browser/internal/repo"
 	"code-browser/internal/search"
+
+	"github.com/patrickmn/go-cache"
 )
 
 // corsMiddleware 为所有响应添加 CORS 头
@@ -45,17 +47,23 @@ func main() {
 
 	log.Printf("成功加载并初始化 %d 个仓库", repoProvider.Count())
 
+	appCache := cache.New(5*time.Minute, 10*time.Minute)
+
 	// 3. 创建并配置搜索服务
 	searchHandlers := &search.Handlers{
 		RepoProvider: repoProvider,
 		Engines: map[string]search.Engine{
 			"zoekt":   &search.ZoektEngine{ApiUrl: "http://localhost:6070"}, // Zoekt API URL (不含 /api/search)
-			"ripgrep": &search.RipgrepEngine{},
+			// "ripgrep": &search.RipgrepEngine{},
 		},
+		Cache: appCache,
 	}
 
 	// 4. 创建核心服务
-	coreHandlers := &core.Handlers{RepoProvider: repoProvider}
+	coreHandlers := &core.Handlers{
+		RepoProvider: repoProvider,
+		Cache: appCache,
+	}
 
 	// 5. 创建路由器并集中注册所有服务的路由 (恢复简洁方式)
 	mux := http.NewServeMux()

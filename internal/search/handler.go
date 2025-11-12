@@ -8,12 +8,14 @@ import (
 	"strconv" // Needed for parsing uint32 repoID
 
 	"code-browser/internal/repo"
+	"github.com/patrickmn/go-cache"
 )
 
 // Handlers 封装了所有与搜索相关的 HTTP 处理器
 type Handlers struct {
 	Engines      map[string]Engine // 搜索引擎实例映射
 	RepoProvider *repo.Provider    // 仓库服务实例，用于获取仓库信息
+	Cache        *cache.Cache      // 缓存实例
 }
 
 // parseRepoIDHelper 从请求路径中解析 uint32 仓库 ID (辅助函数)
@@ -40,6 +42,16 @@ func (h *Handlers) SearchContent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Query parameter 'q' is required", http.StatusBadRequest)
 		return
 	}
+
+	// 为 SearchContent 添加缓存
+	cacheKey := fmt.Sprintf("search:content:%s:%d:%s", engineName, repoID, query)
+	if data, found := h.Cache.Get(cacheKey); found {
+		log.Printf("DEBUG: 缓存命中 (search-content): %s", cacheKey)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(data)
+		return
+	}
+
 	engine, ok := h.Engines[engineName]
 	if !ok {
 		http.Error(w, fmt.Sprintf("Invalid search engine: %s. Available: %v", engineName, getMapKeys(h.Engines)), http.StatusBadRequest)
@@ -59,6 +71,9 @@ func (h *Handlers) SearchContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 缓存结果
+	h.Cache.Set(cacheKey, results, cache.DefaultExpiration)
+
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(results); err != nil {
 		log.Printf("序列化搜索结果失败: %v", err)
@@ -76,7 +91,16 @@ func (h *Handlers) SearchFiles(w http.ResponseWriter, r *http.Request) {
 	engineName := r.URL.Query().Get("engine")
 
 	if engineName == "" {
-		engineName = "ripgrep" // Default to ripgrep for file search
+		engineName = "zoekt" // Default to zoekt if no engine specified
+	}
+
+	// 为 SearchFiles 添加缓存
+	cacheKey := fmt.Sprintf("search:files:%s:%d:%s", engineName, repoID, query)
+	if data, found := h.Cache.Get(cacheKey); found {
+		log.Printf("DEBUG: 缓存命中 (search-files): %s", cacheKey)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(data)
+		return
 	}
 
 	engine, ok := h.Engines[engineName]
@@ -97,6 +121,9 @@ func (h *Handlers) SearchFiles(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("File search failed: %v", err), http.StatusInternalServerError)
 		return
 	}
+
+	// 缓存结果
+	h.Cache.Set(cacheKey, results, cache.DefaultExpiration)
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(results); err != nil {
