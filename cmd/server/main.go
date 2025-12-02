@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"code-browser/internal/analysis"
 	"code-browser/internal/core"
 	"code-browser/internal/repo"
 	"code-browser/internal/search"
@@ -49,12 +50,17 @@ func main() {
 
 	appCache := cache.New(5*time.Minute, 10*time.Minute)
 
+	coreService := core.NewService(repoProvider, appCache)
+
+	zoektEngine := &search.ZoektEngine{ApiUrl: "http://localhost:6070"}
+	ripgrepEngine := &search.RipgrepEngine{}
+
 	// 3. 创建并配置搜索服务
 	searchHandlers := &search.Handlers{
 		RepoProvider: repoProvider,
 		Engines: map[string]search.Engine{
-			"zoekt":   &search.ZoektEngine{ApiUrl: "http://localhost:6070"}, // Zoekt API URL (不含 /api/search)
-			// "ripgrep": &search.RipgrepEngine{},
+			"zoekt":   zoektEngine,
+			"ripgrep": ripgrepEngine,
 		},
 		Cache: appCache,
 	}
@@ -62,8 +68,11 @@ func main() {
 	// 4. 创建核心服务
 	coreHandlers := &core.Handlers{
 		RepoProvider: repoProvider,
-		Cache: appCache,
+		Service:      coreService,
 	}
+
+	analysisService := analysis.NewService(repoProvider, zoektEngine, coreService)
+	analysisHandlers := &analysis.Handlers{Service: analysisService}
 
 	// 5. 创建路由器并集中注册所有服务的路由 (恢复简洁方式)
 	mux := http.NewServeMux()
@@ -79,6 +88,8 @@ func main() {
 	// 搜索服务 (处理器内部解析 {id})
 	mux.HandleFunc("GET /api/repositories/{id}/search", searchHandlers.SearchContent)
 	mux.HandleFunc("GET /api/repositories/{id}/search-files", searchHandlers.SearchFiles)
+
+	mux.HandleFunc("POST /api/intelligence/definition", analysisHandlers.GetDefinitionHandler)
 
 	// 6. 配置并启动服务器
 	server := &http.Server{

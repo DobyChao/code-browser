@@ -3,8 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
+	"path/filepath"
 
 	"code-browser/internal/repo"
 )
@@ -20,6 +22,7 @@ func main() {
 	// Flags for 'add' command
 	repoName := flag.String("name", "", "'add' 命令: 仓库的显示名称 (必填)")
 	repoPath := flag.String("path", "", "'add' 命令: 仓库源代码的绝对路径 (必填)")
+	scipPath := flag.String("scip-path", "", "SCIP 索引文件路径 (register-scip 必填)")
 	// Flags for 'delete' command
 	// --- Parse Flags ---
 	flag.Parse()
@@ -75,9 +78,42 @@ func main() {
 			log.Fatalf("错误: 索引仓库失败: %v", err)
 		}
 		fmt.Printf("成功触发仓库 %d 的 Zoekt 索引生成。\n", *repoID)
+	case "register-scip":
+		if *repoID == 0 || *scipPath == "" {
+			log.Fatal("错误: register-scip 需要 --id 和 --scip-path")
+		}
+		
+		repoInfo, ok := repoProvider.GetRepo(uint32(*repoID))
+		if !ok {
+			log.Fatalf("仓库 %d 未找到", *repoID)
+		}
+
+		// 目标路径: <DataDir>/repos/<ID>/scip/index.scip
+		targetDir := filepath.Join(repoInfo.DataPath, "scip")
+		if err := os.MkdirAll(targetDir, 0755); err != nil {
+			log.Fatalf("创建 SCIP 目录失败: %v", err)
+		}
+		targetFile := filepath.Join(targetDir, "index.scip")
+
+		src, err := os.Open(*scipPath)
+		if err != nil {
+			log.Fatalf("打开源文件失败: %v", err)
+		}
+		defer src.Close()
+
+		dst, err := os.Create(targetFile)
+		if err != nil {
+			log.Fatalf("创建目标文件失败: %v", err)
+		}
+		defer dst.Close()
+
+		if _, err := io.Copy(dst, src); err != nil {
+			log.Fatalf("复制文件失败: %v", err)
+		}
+		fmt.Printf("成功注册 SCIP 索引到: %s\n", targetFile)
 
 	default:
-		fmt.Fprintf(os.Stderr, "错误: 无效或未指定命令 '%s'\n\n", *command)
+		fmt.Println("未知命令。可用: add, delete, index, register-scip")
 		os.Exit(1)
 	}
 }

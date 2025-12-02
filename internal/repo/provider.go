@@ -155,6 +155,22 @@ func (p *Provider) loadReposFromDB() error {
 	return nil
 }
 
+func (p *Provider) GetRepoIDByString(idStr string) uint32 {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for _, repo := range p.repositories {
+		// 尝试通过字符串 ID 匹配仓库
+		idUint64, err := strconv.ParseUint(idStr, 10, 32)
+		if err != nil {
+			continue
+		}
+		if repo.RepoID == uint32(idUint64) {
+			return repo.RepoID
+		}
+	}
+	return 0
+}
+
 // AddRepository 添加一个新的仓库到数据库并更新缓存
 func (p *Provider) AddRepository(id uint32, name string, sourcePath string) error {
 	if id == 0 {

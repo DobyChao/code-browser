@@ -12,8 +12,8 @@
         .container { max-width: 1600px; margin: auto; padding: 1.5rem; }
         .header { border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; }
         .card { background-color: var(--card-bg); border-radius: 0.5rem; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); }
-        pre[class*="language-"] { border-radius: 0.5rem; border: none; padding: 1rem; margin: 0; font-size: 0.875rem; }
-        .line-highlight { background: rgba(255, 255, 255, 0.1); display: block; margin: 0 -1rem; padding: 0 1rem; }
+        pre[class*="language-"] { border-radius: 0.5rem; border: none; padding: 1rem; margin: 0; font-size: 0.875rem; cursor: text; }
+        .line-highlight { background: rgba(255, 255, 255, 0.1); display: inline; }
         .file-tree { list-style: none; padding: 0; margin: 0; font-size: 0.9rem; }
         .tree-item { cursor: pointer; padding: 0.25rem 0.5rem; border-radius: 0.25rem; display: flex; align-items: center; user-select: none; white-space: nowrap; }
         .tree-item:hover { background-color: var(--border-color); }
@@ -26,7 +26,6 @@
         .search-result:hover { background-color: var(--border-color); }
         .icon-btn { cursor: pointer; padding: 0.25rem; border-radius: 0.25rem; }
         .icon-btn:hover { background-color: var(--border-color); }
-        /* 自定义 select 样式 */
         .custom-select {
             -webkit-appearance: none;
             -moz-appearance: none;
@@ -36,13 +35,21 @@
             background-position: right .7rem top 50%;
             background-size: .65rem auto;
         }
-        /* ★★★ 新增样式 ★★★: 用于高亮搜索片段 */
         .search-highlight {
-            background-color: #fcd34d; /* yellow-400 */
-            color: #1f2937; /* gray-800 */
+            background-color: #fcd34d;
+            color: #1f2937;
             border-radius: 0.125rem;
             padding: 0 0.125rem;
         }
+        /* 为可点击的代码添加样式提示 */
+        .code-clickable {
+            cursor: pointer;
+            text-decoration: underline;
+        }
+        #toast {
+            visibility: hidden; min-width: 250px; margin-left: -125px; background-color: #333; color: #fff; text-align: center; border-radius: 4px; padding: 16px; position: fixed; z-index: 50; left: 50%; bottom: 30px; font-size: 17px; opacity: 0; transition: opacity 0.5s;
+        }
+        #toast.show { visibility: visible; opacity: 1; }
     </style>
 </head>
 <body class="antialiased">
@@ -50,7 +57,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
 
     <div class="container">
-        <!-- ... (Header 和 Control Area 保持不变) ... -->
         <header class="header">
             <div><h1 class="text-3xl font-bold text-gray-200">代码仓库浏览器</h1></div>
             <div id="settings-btn" class="icon-btn" title="设置后端服务地址"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></div>
@@ -73,7 +79,6 @@
             </div>
         </div>
 
-        <!-- ... (Main Content Area 布局保持不变) ... -->
         <div class="grid grid-cols-12 gap-6">
             <div class="col-span-12 md:col-span-3 flex flex-col h-[75vh]">
                 <div class="mb-2 flex-shrink-0 flex items-center gap-2">
@@ -84,100 +89,14 @@
             </div>
             <div class="col-span-12 md:col-span-9 flex flex-col h-[75vh]">
                 <div class="mb-2 flex-shrink-0"><input type="text" id="file-path-input" class="block w-full px-3 py-2 rounded-md sm:text-sm bg-gray-800 border-gray-600 text-white" placeholder="文件相对路径..."></div>
-                <div class="card flex-grow overflow-auto"><pre id="file-content-pre" style="display: none;"><code id="file-content-code" class="language-plaintext"></code></pre><div id="file-content-placeholder" class="p-8 text-gray-500 text-center flex items-center justify-center h-full">请从左侧选择一个文件进行查看</div></div>
+                <div class="card flex-grow overflow-auto"><pre id="file-content-pre" style="display: none;"><code id="file-content-code" class="language-plaintext"></code></pre><div id="file-content-placeholder" class="p-8 text-gray-500 text-center flex items-center justify-center h-full">请从左侧选择一个文件进行查看<br><span class="text-sm text-gray-600">(按住 Ctrl + 点击代码可跳转到定义)</span></div></div>
             </div>
         </div>
+        <div id="toast"></div>
     </div>
 
     <script>
         const App = (() => {
-            const state = { /* ... unchanged ... */ };
-            const dom = {
-                // ... (add the new select)
-                searchEngineSelect: document.getElementById('search-engine-select'),
-                // ... (rest of dom elements are unchanged)
-                repoSelect: document.getElementById('repo-select'),
-                fileSearchInput: document.getElementById('file-search-input'),
-                contentSearchInput: document.getElementById('content-search-input'),
-                contentSearchButton: document.getElementById('content-search-button'),
-                listPanel: document.getElementById('list-panel'),
-                fileContentPre: document.getElementById('file-content-pre'),
-                fileContentCode: document.getElementById('file-content-code'),
-                fileContentPlaceholder: document.getElementById('file-content-placeholder'),
-                settingsBtn: document.getElementById('settings-btn'),
-                focusFileBtn: document.getElementById('focus-file-btn'),
-                filePathInput: document.getElementById('file-path-input'),
-            };
-
-            const api = {
-                // ... (api object is mostly unchanged)
-                BASE_URL: localStorage.getItem('apiBaseUrl') || 'http://localhost:8088/api',
-                setBaseUrl(url) { /* ... */ },
-                async get(endpoint) { /* ... */ },
-                getRepositories: () => api.get('/repositories'),
-                getTree: (repoId, path = '') => api.get(`/repositories/${repoId}/tree?path=${encodeURIComponent(path)}`),
-                getBlob: (repoId, path) => api.get(`/repositories/${repoId}/blob?path=${encodeURIComponent(path)}`),
-                // Update search methods to accept an engine parameter
-                searchContent: (repoId, query, engine) => api.get(`/repositories/${repoId}/search?q=${encodeURIComponent(query)}&engine=${engine}`),
-                searchFiles: (repoId, query, engine) => api.get(`/repositories/${repoId}/search-files?q=${encodeURIComponent(query)}&engine=${engine}`),
-            };
-            
-            const render = { /* ... all render functions are unchanged ... */ };
-
-            // --- LOGIC / EVENT HANDLERS ---
-            // ... (most logic is unchanged)
-
-            async function performContentSearch() {
-                const query = dom.contentSearchInput.value.trim();
-                const engine = dom.searchEngineSelect.value; // Get the selected engine
-                if (!state.currentRepoId || !query) {
-                    return alert('请先选择一个仓库并输入搜索内容。');
-                }
-                render.status('正在搜索内容...');
-                try {
-                    // Pass the engine to the API call
-                    const results = await api.searchContent(state.currentRepoId, query, engine);
-                    dom.listPanel.innerHTML = render.contentSearchResults(results);
-                } catch (error) {
-                    console.error('内容搜索失败:', error);
-                    render.status('内容搜索失败，请检查后端服务。');
-                }
-            }
-
-            async function performFileSearch() {
-                const query = dom.fileSearchInput.value.trim();
-                // File search can also have an engine, let's default to ripgrep for speed and simplicity
-                // as Zoekt file search can be slow if not configured correctly.
-                const engine = 'ripgrep'; 
-                if (!state.currentRepoId) return;
-                if (!query) {
-                    await loadAndRenderRootTree();
-                    return;
-                }
-                render.status('正在搜索文件名...');
-                try {
-                    const results = await api.searchFiles(state.currentRepoId, query, engine);
-                    dom.listPanel.innerHTML = render.fileSearchResults(results);
-                } catch (error) {
-                    console.error('文件名搜索失败:', error);
-                    render.status('文件名搜索失败。');
-                }
-            }
-            
-            // ... (the rest of the script remains the same, just paste the formatted version)
-
-            function init() {
-                // ... (init function with all event listeners)
-                // Just ensure the performContentSearch and performFileSearch are the updated versions
-            }
-
-            return { init };
-        })();
-
-        // This is a placeholder for the fully formatted JS code from the previous correct version.
-        // The logic from the previous step is correct, just needs re-pasting here with formatting.
-        // Full, correctly formatted JS code follows:
-        const App_Formatted = (() => {
             // --- 1. STATE MANAGEMENT ---
             const state = {
                 currentRepoId: '',
@@ -200,6 +119,7 @@
                 settingsBtn: document.getElementById('settings-btn'),
                 focusFileBtn: document.getElementById('focus-file-btn'),
                 filePathInput: document.getElementById('file-path-input'),
+                toast: document.getElementById('toast'),
             };
 
             // --- 3. API CALLS ---
@@ -218,11 +138,25 @@
                     const contentType = response.headers.get("content-type");
                     return contentType && contentType.includes("application/json") ? response.json() : response.text();
                 },
+                async post(endpoint, data) {
+                    const response = await fetch(`${this.BASE_URL}${endpoint}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    });
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                    }
+                    return response.json();
+                },
                 getRepositories: () => api.get('/repositories'),
                 getTree: (repoId, path = '') => api.get(`/repositories/${repoId}/tree?path=${encodeURIComponent(path)}`),
                 getBlob: (repoId, path) => api.get(`/repositories/${repoId}/blob?path=${encodeURIComponent(path)}`),
                 searchContent: (repoId, query, engine) => api.get(`/repositories/${repoId}/search?q=${encodeURIComponent(query)}&engine=${engine}`),
                 searchFiles: (repoId, query, engine) => api.get(`/repositories/${repoId}/search-files?q=${encodeURIComponent(query)}&engine=${engine}`),
+                // ★★★ 新增: 获取定义的 API ★★★
+                getDefinition: (repoId, filePath, line, character) => api.post('/intelligence/definition', {repoId, filePath, line, character}),
             };
 
             // --- 4. RENDER FUNCTIONS ---
@@ -251,9 +185,13 @@
                     dom.fileContentPre.style.display = 'block';
                     const lang = utils.getLanguageFromPath(path);
                     dom.fileContentCode.className = `language-${lang}`;
+                    // 先设置文本内容，保持原有格式
                     dom.fileContentCode.textContent = content;
-                    Prism.highlightAll();
                     dom.filePathInput.value = path;
+                    // 核心修复：显式调用 Prism 高亮当前元素
+                    if (window.Prism) {
+                        Prism.highlightElement(dom.fileContentCode);
+                    }
                 },
                 contentSearchResults(results) {
                     if (!results || results.length === 0) {
@@ -289,6 +227,14 @@
                 },
                 backButton: () => `<div class="tree-item" data-action="back-to-tree">↩️ 返回文件树浏览</div>`,
                 noResults: () => `<div class="p-2 text-gray-500">未找到结果。</div>`,
+                toast(message) {
+                    dom.toast.textContent = message;
+                    // ★★★ 修复: 使用 classList 操作，更安全 ★★★
+                    dom.toast.classList.add("show");
+                    setTimeout(() => { 
+                        dom.toast.classList.remove("show"); 
+                    }, 3000);
+                }
             };
 
             // --- 5. LOGIC / EVENT HANDLERS ---
@@ -412,6 +358,52 @@
                 }
             }
 
+            async function handleCodeClick(event) {
+                // 检查 Ctrl / Cmd 键
+                if (!event.ctrlKey && !event.metaKey) return;
+
+                // 核心修复：使用 caretRangeFromPoint 替代 getSelection
+                // 这能精确获取点击位置的文本偏移量，不受 Prism DOM 结构影响
+                const position = utils.getClickPosition(dom.fileContentCode, event);
+                
+                if (!position) {
+                    console.log("无法识别点击位置");
+                    return;
+                }
+
+                console.log("点击位置:", position);
+                dom.fileContentCode.style.cursor = 'wait';
+                render.toast("正在查找定义...");
+
+                try {
+                    const results = await api.getDefinition(state.currentRepoId, state.currentFilePath, position.line, position.character);
+                    dom.fileContentCode.style.cursor = 'text';
+
+                    if (results && results.length > 0) {
+                        const def = results[0];
+                        if (def.source === 'search') {
+                            render.toast("模糊跳转 (基于搜索)");
+                        } else {
+                            console.log("精确跳转 (SCIP)");
+                            render.toast("跳转到定义");
+                        }
+
+                        if (def.repoId !== state.currentRepoId) {
+                            alert(`定义位于另一个仓库: ${def.repoId} (暂不支持自动切换)`);
+                            return;
+                        }
+                        await loadFileContent(def.filePath, def.range.startLine);
+                    } else {
+                        render.toast("未找到定义");
+                    }
+                } catch (error) {
+                    dom.fileContentCode.style.cursor = 'text';
+                    console.error("获取定义失败:", error);
+                    render.toast("获取定义失败");
+                }
+            }
+
+
             // --- 6. UTILITIES ---
             const utils = {
                 clearFileContent() {
@@ -475,6 +467,57 @@
                     resultHtml += esc(lineText.substring(lastIndex));
                     
                     return resultHtml;
+                },
+
+                // ★★★ 新增: 基于物理坐标的点击位置计算 ★★★
+                getClickPosition(element, event) {
+                    let range;
+                    // 标准 API: caretRangeFromPoint (Chrome, Safari, Edge)
+                    if (document.caretRangeFromPoint) {
+                        range = document.caretRangeFromPoint(event.clientX, event.clientY);
+                    } 
+                    // Firefox API: caretPositionFromPoint
+                    else if (document.caretPositionFromPoint) {
+                        const pos = document.caretPositionFromPoint(event.clientX, event.clientY);
+                        if (pos) {
+                            range = document.createRange();
+                            range.setStart(pos.offsetNode, pos.offset);
+                            range.collapse(true);
+                        }
+                    }
+
+                    // 确保点击在代码区域内
+                    if (!range || !element.contains(range.startContainer)) {
+                        return null;
+                    }
+
+                    // 创建一个从代码起始点到点击点的 Range
+                    const preCaretRange = range.cloneRange();
+                    preCaretRange.selectNodeContents(element);
+                    preCaretRange.setEnd(range.startContainer, range.startOffset);
+                    
+                    // 获取纯文本偏移量
+                    const offset = preCaretRange.toString().length;
+                    const textContent = element.textContent;
+                    
+                    // 计算行号和列号
+                    // 注意：这里的算法假设换行符是 \n。Prism 高亮后通常不会改变文本的换行结构。
+                    let line = 0;
+                    let character = 0;
+                    let currentOffset = 0;
+
+                    for (let i = 0; i < textContent.length; i++) {
+                        if (currentOffset === offset) break;
+                        if (textContent[i] === '\n') {
+                            line++;
+                            character = 0;
+                        } else {
+                            character++;
+                        }
+                        currentOffset++;
+                    }
+                    
+                    return { line, character };
                 }
             };
 
@@ -543,6 +586,11 @@
                     }
                 });
 
+                // ★★★ 注册代码点击事件 ★★★
+                dom.fileContentCode.addEventListener('click', handleCodeClick);
+
+                // Initial Load
+
                 api.getRepositories()
                     .then(render.repositories)
                     .catch(err => {
@@ -554,10 +602,8 @@
 
             return { init };
         })();
-        
-        // Final corrected code assignment
-        document.addEventListener('DOMContentLoaded', App_Formatted.init);
+
+        document.addEventListener('DOMContentLoaded', App.init);
     </script>
 </body>
 </html>
-

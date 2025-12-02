@@ -64,6 +64,13 @@ This script builds the components (see `cmd/` subpackages). You can also use pla
 
     Where `<data-dir>` is the `-data-dir` value (default `./.data`) and the command will write index files into `<data-dir>/zoekt-index`.
 
+  Register SCIP index:
+
+  ```bash
+  ./repo-cli -command register-scip -id <repoId> -scip-path </path/to/index.scip>
+  ```
+  Copies the provided `.scip` file into `<data-dir>/repos/<id>/scip/index.scip` without modification.
+
 - `./repo-server` — starts the HTTP service that serves repository information and search results. See `cmd/server/main.go` for flags and configuration options. Note: at present you must start the Zoekt webserver manually (see below).
 
   Example:
@@ -96,3 +103,11 @@ Ensure the `zoekt-webserver` process is running and reachable by the `repo-serve
 ```
 
 Note: `start.sh` automatically starts `zoekt-webserver`.
+
+**API line/column bases**
+
+- Definition API (`POST /api/intelligence/definition`) returns line numbers as 1-based to match UI highlighting, while columns currently follow SCIP's original semantics.
+- Search results (`GET /api/repositories/{id}/search`) include `lineNum` as 1-based.
+- SCIP index ingestion is preserved; we convert only outward-facing line numbers to ensure accurate jump-to-definition alignment.
+
+*(moved to Command-line tools section)*
