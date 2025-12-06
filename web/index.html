@@ -155,8 +155,9 @@
                 getBlob: (repoId, path) => api.get(`/repositories/${repoId}/blob?path=${encodeURIComponent(path)}`),
                 searchContent: (repoId, query, engine) => api.get(`/repositories/${repoId}/search?q=${encodeURIComponent(query)}&engine=${engine}`),
                 searchFiles: (repoId, query, engine) => api.get(`/repositories/${repoId}/search-files?q=${encodeURIComponent(query)}&engine=${engine}`),
-                // ★★★ 新增: 获取定义的 API ★★★
-                getDefinition: (repoId, filePath, line, character) => api.post('/intelligence/definition', {repoId, filePath, line, character}),
+                // ★★★ 适配新的分析路由 ★★★
+                getDefinition: (repoId, filePath, line, character) => api.post('/intelligence/definitions', {repoId, filePath, line, character}),
+                getReferences: (repoId, filePath, line, character) => api.post('/intelligence/references', {repoId, filePath, line, character}),
             };
 
             // --- 4. RENDER FUNCTIONS ---
@@ -394,7 +395,21 @@
                         }
                         await loadFileContent(def.filePath, def.range.startLine);
                     } else {
-                        render.toast("未找到定义");
+                        // 尝试引用
+                        dom.fileContentCode.style.cursor = 'wait';
+                        const refs = await api.getReferences(state.currentRepoId, state.currentFilePath, position.line, position.character);
+                        dom.fileContentCode.style.cursor = 'text';
+                        if (refs && refs.length > 0) {
+                            const ref = refs[0];
+                            render.toast("跳转到引用");
+                            if (ref.repoId !== state.currentRepoId) {
+                                alert(`目标位于另一个仓库: ${ref.repoId} (暂不支持自动切换)`);
+                                return;
+                            }
+                            await loadFileContent(ref.filePath, ref.range.startLine);
+                        } else {
+                            render.toast("未找到定义或引用");
+                        }
                     }
                 } catch (error) {
                     dom.fileContentCode.style.cursor = 'text';

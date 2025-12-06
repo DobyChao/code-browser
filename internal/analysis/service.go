@@ -40,7 +40,7 @@ func NewService(repoProvider *repo.Provider, searchEngine search.Engine, coreSer
 }
 
 // GetDefinition 查找给定位置符号的定义
-func (s *Service) GetDefinition(req DefinitionRequest) ([]DefinitionResponse, error) {
+func (s *Service) GetDefinition(req DefinitionRequest) ([]AnalysisResult, error) {
 	repoID := s.RepoProvider.GetRepoIDByString(req.RepoID)
 	if repoID == 0 {
 		return nil, fmt.Errorf("仓库 '%s' 未找到", req.RepoID)
@@ -72,7 +72,7 @@ func (s *Service) GetDefinition(req DefinitionRequest) ([]DefinitionResponse, er
 }
 
 // getDefinitionFromSearch 使用搜索引擎尝试查找定义
-func (s *Service) getDefinitionFromSearch(repoInfo repo.Repository, filePath string, line, char int32) ([]DefinitionResponse, error) {
+func (s *Service) getDefinitionFromSearch(repoInfo repo.Repository, filePath string, line, char int32) ([]AnalysisResult, error) {
 	// ★ 优化: 使用 CoreService 获取文件内容，利用其缓存 ★
 	content, _, err := s.CoreService.GetFileContent(repoInfo.RepoID, filePath)
 	if err != nil {
@@ -120,20 +120,15 @@ func (s *Service) getDefinitionFromSearch(repoInfo repo.Repository, filePath str
 		return nil, err
 	}
 
-	var definitions []DefinitionResponse
+	var definitions []AnalysisResult
 	repoIDStr := strconv.FormatUint(uint64(repoInfo.RepoID), 10)
 	for _, res := range searchResults {
-		def := DefinitionResponse{
-			Kind:     "search-result",
+		def := AnalysisResult{
+			Kind:     "definition",
 			RepoID:   repoIDStr,
 			FilePath: res.Path,
-			Range: Location{
-				StartLine:   int32(res.LineNum),
-				StartColumn: 0,
-				EndLine:     int32(res.LineNum),
-				EndColumn:   0,
-			},
-			Source: "search",
+			Range:    Location{StartLine: int32(res.LineNum), StartColumn: 0, EndLine: int32(res.LineNum), EndColumn: 0, LineBase: 1, ColumnBase: 0},
+			Source:   "search",
 		}
 		definitions = append(definitions, def)
 		if len(definitions) >= 10 {
@@ -145,7 +140,7 @@ func (s *Service) getDefinitionFromSearch(repoInfo repo.Repository, filePath str
 }
 
 // getDefinitionFromSCIP 封装原有的 SCIP 逻辑
-func (s *Service) getDefinitionFromSCIP(scipPath, filePath string, line, char int32, repoIDStr string) ([]DefinitionResponse, error) {
+func (s *Service) getDefinitionFromSCIP(scipPath, filePath string, line, char int32, repoIDStr string) ([]AnalysisResult, error) {
 	// ★ 优化: 从缓存读取 SCIP 索引 ★
 	var index *scip.Index
 	if data, found := s.ScipCache.Get(scipPath); found {
@@ -179,11 +174,11 @@ func (s *Service) getDefinitionFromSCIP(scipPath, filePath string, line, char in
 		return nil, fmt.Errorf("symbol not found")
 	}
 
-	var definitions []DefinitionResponse
+	var definitions []AnalysisResult
 	for _, doc := range index.Documents {
 		for _, occ := range doc.Occurrences {
 			if occ.Symbol == symbol && (occ.SymbolRoles&int32(scip.SymbolRole_Definition) != 0) {
-				def := DefinitionResponse{
+				def := AnalysisResult{
 					Kind:     "definition",
 					RepoID:   repoIDStr,
 					FilePath: doc.RelativePath,
@@ -192,6 +187,8 @@ func (s *Service) getDefinitionFromSCIP(scipPath, filePath string, line, char in
 						StartColumn: occ.Range[1],
 						EndLine:     occ.Range[0] + 1,
 						EndColumn:   occ.Range[1],
+						LineBase:    1,
+						ColumnBase:  0,
 					},
 					Source: "scip",
 				}
@@ -221,7 +218,7 @@ func readSCIPIndex(path string) (*scip.Index, error) {
 	return &index, nil
 }
 
-func (s *Service) getDefinitionFromSCIPForTest(index *scip.Index, filePath string, line, char int32, repoIDStr string) ([]DefinitionResponse, error) {
+func (s *Service) getDefinitionFromSCIPForTest(index *scip.Index, filePath string, line, char int32, repoIDStr string) ([]AnalysisResult, error) {
 	var targetDoc *scip.Document
 	for _, doc := range index.Documents {
 		if doc.RelativePath == filePath {
@@ -238,11 +235,11 @@ func (s *Service) getDefinitionFromSCIPForTest(index *scip.Index, filePath strin
 		return nil, fmt.Errorf("symbol not found")
 	}
 
-	var definitions []DefinitionResponse
+	var definitions []AnalysisResult
 	for _, doc := range index.Documents {
 		for _, occ := range doc.Occurrences {
 			if occ.Symbol == symbol && (occ.SymbolRoles&int32(scip.SymbolRole_Definition) != 0) {
-				def := DefinitionResponse{
+				def := AnalysisResult{
 					Kind:     "definition",
 					RepoID:   repoIDStr,
 					FilePath: doc.RelativePath,
@@ -266,6 +263,136 @@ func (s *Service) getDefinitionFromSCIPForTest(index *scip.Index, filePath strin
 		}
 	}
 	return definitions, nil
+}
+
+// GetReferences 查找符号的引用位置
+func (s *Service) GetReferences(req DefinitionRequest) ([]AnalysisResult, error) {
+	repoID := s.RepoProvider.GetRepoIDByString(req.RepoID)
+	if repoID == 0 {
+		return nil, fmt.Errorf("仓库 '%s' 未找到", req.RepoID)
+	}
+	repoInfo, ok := s.RepoProvider.GetRepo(repoID)
+	if !ok {
+		return nil, fmt.Errorf("仓库 ID '%d' 未找到", repoID)
+	}
+	scipPath := filepath.Join(repoInfo.DataPath, "scip", "index.scip")
+	if _, found := s.ScipCache.Get(scipPath); found {
+		refs, err := s.getReferencesFromSCIP(scipPath, req.FilePath, req.Line, req.Character, req.RepoID)
+		if err == nil && len(refs) > 0 {
+			return refs, nil
+		}
+	}
+	if _, err := os.Stat(scipPath); err == nil {
+		refs, err := s.getReferencesFromSCIP(scipPath, req.FilePath, req.Line, req.Character, req.RepoID)
+		if err == nil && len(refs) > 0 {
+			return refs, nil
+		}
+	}
+	return s.getReferencesFromSearch(repoInfo, req.FilePath, req.Line, req.Character)
+}
+
+func (s *Service) getReferencesFromSCIP(scipPath, filePath string, line, char int32, repoIDStr string) ([]AnalysisResult, error) {
+	var index *scip.Index
+	if data, found := s.ScipCache.Get(scipPath); found {
+		index = data.(*scip.Index)
+	} else {
+		var err error
+		index, err = readSCIPIndex(scipPath)
+		if err != nil {
+			return nil, err
+		}
+		s.ScipCache.Set(scipPath, index, cache.DefaultExpiration)
+	}
+	var targetDoc *scip.Document
+	for _, doc := range index.Documents {
+		if doc.RelativePath == filePath {
+			targetDoc = doc
+			break
+		}
+	}
+	if targetDoc == nil {
+		return nil, fmt.Errorf("doc not found")
+	}
+	symbol := findSymbolAtPosition(targetDoc, line, char)
+	if symbol == "" {
+		return nil, fmt.Errorf("symbol not found")
+	}
+	var results []AnalysisResult
+	for _, doc := range index.Documents {
+		for _, occ := range doc.Occurrences {
+			if occ.Symbol == symbol && (occ.SymbolRoles&int32(scip.SymbolRole_Definition) == 0) {
+				res := AnalysisResult{
+					Kind:     "reference",
+					RepoID:   repoIDStr,
+					FilePath: doc.RelativePath,
+					Range: Location{
+						StartLine:   occ.Range[0] + 1,
+						StartColumn: occ.Range[1],
+						EndLine:     occ.Range[0] + 1,
+						EndColumn:   occ.Range[1],
+						LineBase:    1,
+						ColumnBase:  0,
+					},
+					Source: "scip",
+				}
+				if len(occ.Range) == 4 {
+					res.Range.EndLine = occ.Range[2] + 1
+					res.Range.EndColumn = occ.Range[3]
+				} else if len(occ.Range) == 3 {
+					res.Range.EndLine = occ.Range[0] + 1
+					res.Range.EndColumn = occ.Range[2]
+				}
+				results = append(results, res)
+			}
+		}
+	}
+	return results, nil
+}
+
+func (s *Service) getReferencesFromSearch(repoInfo repo.Repository, filePath string, line, char int32) ([]AnalysisResult, error) {
+	content, _, err := s.CoreService.GetFileContent(repoInfo.RepoID, filePath)
+	if err != nil {
+		return nil, fmt.Errorf("无法读取源文件以提取符号: %w", err)
+	}
+	reader := bytes.NewReader(content)
+	scanner := bufio.NewScanner(reader)
+	currentLine := int32(0)
+	var lineText string
+	for scanner.Scan() {
+		if currentLine == line {
+			lineText = scanner.Text()
+			break
+		}
+		currentLine++
+	}
+	symbol := extractWordAtPosition(lineText, int(char))
+	if symbol == "" {
+		return nil, fmt.Errorf("光标处未找到有效符号")
+	}
+	query := fmt.Sprintf("\\b%s\\b", symbol)
+	if _, ok := s.SearchEngine.(*search.ZoektEngine); ok {
+		// Zoekt can use sym: for symbol-aware searches but references vary; use text fallback
+		query = fmt.Sprintf("\\b%s\\b", symbol)
+	}
+	results, err := s.SearchEngine.SearchContent(repoInfo, query)
+	if err != nil {
+		return nil, err
+	}
+	repoIDStr := strconv.FormatUint(uint64(repoInfo.RepoID), 10)
+	var out []AnalysisResult
+	for _, r := range results {
+		out = append(out, AnalysisResult{
+			Kind:     "reference",
+			RepoID:   repoIDStr,
+			FilePath: r.Path,
+			Range:    Location{StartLine: int32(r.LineNum), StartColumn: 0, EndLine: int32(r.LineNum), EndColumn: 0, LineBase: 1, ColumnBase: 0},
+			Source:   "search",
+		})
+		if len(out) >= 50 {
+			break
+		}
+	}
+	return out, nil
 }
 
 func findSymbolAtPosition(doc *scip.Document, line, char int32) string {

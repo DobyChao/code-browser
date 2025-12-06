@@ -59,4 +59,3 @@ func TestGetDefinitionFromSCIP_LineNumberMapping_MultiLine(t *testing.T) {
         t.Fatalf("columns mismatch: %d..%d", d.Range.StartColumn, d.Range.EndColumn)
     }
 }
-

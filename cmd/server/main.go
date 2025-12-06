@@ -89,7 +89,8 @@ func main() {
 	mux.HandleFunc("GET /api/repositories/{id}/search", searchHandlers.SearchContent)
 	mux.HandleFunc("GET /api/repositories/{id}/search-files", searchHandlers.SearchFiles)
 
-	mux.HandleFunc("POST /api/intelligence/definition", analysisHandlers.GetDefinitionHandler)
+    mux.HandleFunc("POST /api/intelligence/definitions", analysisHandlers.GetDefinitionHandler)
+    mux.HandleFunc("POST /api/intelligence/references", analysisHandlers.GetReferencesHandler)
 
 	// 6. 配置并启动服务器
 	server := &http.Server{

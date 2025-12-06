@@ -1,33 +1,25 @@
 # Code Browser
 
-This repository provides a small code browsing service with a CLI for managing repositories and a server component. The project uses Go and Sourcegraph's Zoekt for indexing and searching repositories.
+A lightweight code browsing service with a CLI to manage repositories and an HTTP server. Uses Zoekt for fast indexing/search; optional SCIP index enables precise jump-to-definition.
 
-**Dependencies**
-- **Go**: version >= 1.25.1.
-- **Zoekt tools**: install the following binaries into your Go bin directory:
-
-  ```bash
-  go install github.com/sourcegraph/zoekt/cmd/zoekt-git-index@latest
-  go install github.com/sourcegraph/zoekt/cmd/zoekt-webserver@latest
-  ```
-
-- Ensure the installed binaries are available in your shell `PATH`. A common configuration is:
-
-  ```bash
-  export PATH="$PATH:$HOME/go/bin"
-  ```
-
-  Verify with `which zoekt-git-index` and `which zoekt-webserver`.
-
-**Build**
-
-The repository includes a simple build helper. From the project root run:
+**Quick Start**
 
 ```bash
 ./build.sh
+./start.sh    # starts repo-server and zoekt-webserver
+# Add a repository
+./repo-cli -command add -id 1 -name "my-repo" -path "/abs/path/to/my-repo" -data-dir .data
+# Trigger Zoekt index
+./repo-cli -command index -id 1 -data-dir .data
+# Register SCIP index
+./repo-cli -command register-scip -id 1 -scip-path /path/to/index.scip
 ```
 
-This script builds the components (see `cmd/` subpackages). You can also use plain `go build` within each `cmd/*` directory if you prefer.
+**Basic Usage**
+
+- Web UI: open `http://localhost:8088/`
+- API: see detailed docs below
+- Stop services: `./stop.sh`
 
 **Command-line tools**
 
@@ -52,17 +44,9 @@ This script builds the components (see `cmd/` subpackages). You can also use pla
   ./repo-cli -command index -id 1 -data-dir ".data"
   ```
 
-  Note: `repo-cli`'s `index` action calls the internal `IndexRepositoryZoekt` implementation which:
-
-  - Verifies the repository at the configured `-path` is a Git repository.
-  - Updates the repository's `.git/config` with `zoekt.name` and `zoekt.repoid` entries.
-  - Calls the `zoekt-git-index` binary (must be in `PATH`) with arguments similar to:
-
-    ```bash
-    zoekt-git-index -index <data-dir>/zoekt-index /abs/path/to/my-repo
-    ```
-
-    Where `<data-dir>` is the `-data-dir` value (default `./.data`) and the command will write index files into `<data-dir>/zoekt-index`.
+  Notes:
+  - Requires `zoekt-git-index` and `zoekt-webserver` in `PATH`.
+  - Ensure repo path is a valid Git repository before indexing.
 
   Register SCIP index:
 
@@ -79,16 +63,16 @@ This script builds the components (see `cmd/` subpackages). You can also use pla
   ./repo-server --port 8080 --data-dir ".data"
   ```
 
-**Zoekt integration**
+**Dependencies**
+- Go >= 1.25.1
+- Zoekt tools:
+  ```bash
+  go install github.com/sourcegraph/zoekt/cmd/zoekt-git-index@latest
+  go install github.com/sourcegraph/zoekt/cmd/zoekt-webserver@latest
+  export PATH="$PATH:$HOME/go/bin"
+  ```
 
-This project uses Zoekt for fast repository indexing/search. Two tools are required:
-
-- `zoekt-git-index` — creates Zoekt index files for a Git repository.
-- `zoekt-webserver` — serves Zoekt indexes over HTTP for queries.
-
-Ensure the `zoekt-webserver` process is running and reachable by the `repo-server` configuration.
-
-**Start/Stop helper (lazy mode)**
+**Start/Stop**
 
 - `start.sh` — convenience script to start the service and any local helpers. Run:
 
@@ -104,10 +88,19 @@ Ensure the `zoekt-webserver` process is running and reachable by the `repo-serve
 
 Note: `start.sh` automatically starts `zoekt-webserver`.
 
-**API line/column bases**
+**Detailed Docs**
 
-- Definition API (`POST /api/intelligence/definition`) returns line numbers as 1-based to match UI highlighting, while columns currently follow SCIP's original semantics.
-- Search results (`GET /api/repositories/{id}/search`) include `lineNum` as 1-based.
-- SCIP index ingestion is preserved; we convert only outward-facing line numbers to ensure accurate jump-to-definition alignment.
+## Detailed Documentation
+- [API Interface](./docs/api.md) 
+- [Configuration Guide](./docs/configuration.md) 
+- [Development Manual](./docs/development.md) 
+
+**Documentation Versioning**
+- Docs follow repository changes; update `docs/` alongside code.
+- For releases, tag the repo and consider freezing a `docs/` snapshot per tag.
+
+**License & Contributing**
+- License: MIT (add `LICENSE` file if missing)
+- Contributions welcome: please run `go test ./...` and follow existing module patterns.
 
 *(moved to Command-line tools section)*
