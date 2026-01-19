@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>仓库详情管理 - Code Browser</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root { --main-bg: #1a202c; --card-bg: #2d3748; --border-color: #4a5568; --text-color: #e2e8f0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: var(--main-bg); color: var(--text-color); }
+        .card { background-color: var(--card-bg); border-radius: 0.5rem; padding: 1.5rem; margin-bottom: 1.5rem; }
+        .input-dark { background-color: #4a5568; border: 1px solid #718096; color: white; padding: 0.5rem; border-radius: 0.25rem; width: 100%; }
+        .btn { padding: 0.5rem 1rem; border-radius: 0.25rem; font-weight: bold; cursor: pointer; transition: background-color 0.2s; }
+        .btn-primary { background-color: #4299e1; color: white; }
+        .btn-primary:hover { background-color: #3182ce; }
+        .btn-success { background-color: #48bb78; color: white; }
+        .btn-success:hover { background-color: #38a169; }
+        .btn-secondary { background-color: #718096; color: white; }
+        .btn-secondary:hover { background-color: #4a5568; }
+        #toast { visibility: hidden; min-width: 250px; margin-left: -125px; background-color: #333; color: #fff; text-align: center; border-radius: 4px; padding: 16px; position: fixed; z-index: 50; left: 50%; bottom: 30px; opacity: 0; transition: opacity 0.5s; }
+        #toast.show { visibility: visible; opacity: 1; }
+        code { background-color: #111; padding: 0.2rem 0.4rem; border-radius: 0.25rem; font-family: monospace; color: #fbbf24; }
+    </style>
+</head>
+<body class="p-8">
+
+    <div class="max-w-6xl mx-auto">
+        <header class="flex justify-between items-center mb-8 pb-4 border-b border-gray-600">
+            <h1 class="text-3xl font-bold">仓库详情管理</h1>
+            <a href="/admin.html" class="text-blue-400 hover:text-blue-300">← 返回列表</a>
+        </header>
+
+        <div id="loading" class="text-center text-gray-400 text-xl py-10">正在加载...</div>
+
+        <div id="repo-content" style="display: none;">
+            <!-- Basic Info -->
+            <div class="card">
+                <h2 class="text-xl mb-4 font-semibold border-b border-gray-600 pb-2">基本信息</h2>
+                <div class="grid grid-cols-2 gap-4">
+                    <div><span class="text-gray-400">ID:</span> <span id="repo-id" class="font-mono ml-2"></span></div>
+                    <div><span class="text-gray-400">名称:</span> <span id="repo-name" class="font-bold ml-2 text-blue-300"></span></div>
+                    <div class="col-span-2"><span class="text-gray-400">源码路径:</span> <span id="repo-path" class="font-mono ml-2"></span></div>
+                </div>
+            </div>
+
+            <!-- Auto Indexing -->
+            <div class="card">
+                <h2 class="text-xl mb-4 font-semibold border-b border-gray-600 pb-2">自动索引 (Zoekt)</h2>
+                <p class="mb-4 text-sm text-gray-300">通过后台进程直接扫描源码目录生成索引。适用于本地开发或源码与服务在同一机器的场景。</p>
+                <button id="btn-trigger-index" class="btn btn-success">立即触发自动索引</button>
+            </div>
+
+            <!-- Manual Indexing Guide -->
+            <div class="card">
+                <h2 class="text-xl mb-4 font-semibold border-b border-gray-600 pb-2">手动导入 Zoekt 索引</h2>
+                
+                <div class="bg-gray-800 p-4 rounded mb-6 text-sm">
+                    <h3 class="font-bold text-yellow-500 mb-2">💡 操作指南</h3>
+                    <p class="mb-2">如果仓库非常庞大，建议在高性能机器上生成索引，然后将文件传输到此服务器。</p>
+                    <ol class="list-decimal list-inside space-y-1 text-gray-300 mb-4">
+                        <li>在目标机器安装 <code class="text-xs">zoekt-git-index</code></li>
+                        <li>执行以下命令生成索引：</li>
+                    </ol>
+                    <pre class="bg-black p-3 rounded text-green-400 overflow-x-auto mb-4 select-all cursor-text"><code id="manual-index-cmd" class="bg-transparent text-green-400 p-0"></code></pre>
+                    <ol class="list-decimal list-inside space-y-1 text-gray-300" start="3">
+                        <li>上述命令会生成多个分片文件，例如 <code id="example-shard-name">...00000.zoekt</code></li>
+                        <li>将这些文件上传到本服务器的某个临时目录</li>
+                        <li>在下方输入所有文件的绝对路径（每行一个）</li>
+                    </ol>
+                </div>
+
+                <div class="mb-4">
+                    <label class="block text-sm mb-2 font-medium">索引文件路径 (每行一个绝对路径)</label>
+                    <textarea id="zoekt-paths-input" class="input-dark font-mono text-sm" rows="5" placeholder="/tmp/upload/myrepo.00000.zoekt&#10;/tmp/upload/myrepo.00001.zoekt"></textarea>
+                </div>
+                <button id="btn-register-zoekt" class="btn btn-primary">导入索引文件</button>
+            </div>
+
+            <!-- SCIP Indexing -->
+            <div class="card">
+                <h2 class="text-xl mb-4 font-semibold border-b border-gray-600 pb-2">SCIP 智能索引</h2>
+                <p class="mb-4 text-sm text-gray-300">SCIP 索引用于精确的“跳转到定义”和“查找引用”。需使用相应语言的 scip 索引器生成。</p>
+                <div class="flex gap-4 items-end">
+                    <div class="flex-grow">
+                        <label class="block text-sm mb-1">SCIP 文件路径 (index.scip)</label>
+                        <input type="text" id="scip-path-input" class="input-dark" placeholder="/path/to/index.scip">
+                    </div>
+                    <button id="btn-register-scip" class="btn btn-secondary">注册 SCIP</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast"></div>
+
+    <script>
+        const API_BASE = 'http://localhost:8088/api';
+        const urlParams = new URLSearchParams(window.location.search);
+        const repoID = urlParams.get('id');
+        const token = localStorage.getItem('adminToken');
+
+        // DOM
+        const dom = {
+            loading: document.getElementById('loading'),
+            content: document.getElementById('repo-content'),
+            repoId: document.getElementById('repo-id'),
+            repoName: document.getElementById('repo-name'),
+            repoPath: document.getElementById('repo-path'),
+            toast: document.getElementById('toast'),
+            zoektInput: document.getElementById('zoekt-paths-input'),
+            scipInput: document.getElementById('scip-path-input'),
+            btnTrigger: document.getElementById('btn-trigger-index'),
+            btnRegisterZoekt: document.getElementById('btn-register-zoekt'),
+            btnRegisterScip: document.getElementById('btn-register-scip'),
+        };
+
+        if (!token) {
+            window.location.href = '/admin.html';
+        }
+
+        async function fetchAPI(endpoint, options = {}) {
+            const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`, ...options.headers };
+            try {
+                const res = await fetch(`${API_BASE}${endpoint}`, { ...options, headers });
+                if (res.status === 401) {
+                    alert('鉴权失败，请重新登录');
+                    window.location.href = '/admin.html';
+                    return null;
+                }
+                if (!res.ok) throw new Error(await res.text());
+                return res;
+            } catch (err) {
+                showToast(`错误: ${err.message}`);
+                throw err;
+            }
+        }
+
+        async function init() {
+            if (!repoID) {
+                alert('缺少仓库 ID');
+                window.location.href = '/admin.html';
+                return;
+            }
+
+            try {
+                // Get all repos and find current one (since we don't have get-single-repo api yet)
+                const res = await fetchAPI('/admin/repositories');
+                const repos = await res.json();
+                const repo = repos.find(r => r.id == repoID);
+                
+                if (!repo) throw new Error('仓库不存在');
+
+                dom.repoId.textContent = repo.id;
+                dom.repoName.textContent = repo.name;
+                dom.repoPath.textContent = repo.path || 'N/A';
+                
+                // Generate manual commands
+                const sanitizedName = repo.name.replace(/[^a-zA-Z0-9]+/g, '_');
+                const zoektName = repo.id.toString().padStart(10, '0') + '_' + sanitizedName;
+                const cmd = `# 进入仓库目录
+cd /path/to/your/repo
+
+# 配置 Zoekt 元数据 (必须)
+git config zoekt.repoid ${repo.id}
+git config zoekt.name ${zoektName}
+
+# 生成索引 (在当前目录生成)
+zoekt-git-index -index . .`;
+                
+                document.getElementById('manual-index-cmd').textContent = cmd;
+                document.getElementById('example-shard-name').textContent = `${zoektName}.00000.zoekt`;
+
+                dom.loading.style.display = 'none';
+                dom.content.style.display = 'block';
+            } catch (err) {
+                dom.loading.textContent = `加载失败: ${err.message}`;
+            }
+        }
+
+        function showToast(msg) {
+            dom.toast.textContent = msg;
+            dom.toast.classList.add("show");
+            setTimeout(() => { dom.toast.classList.remove("show"); }, 3000);
+        }
+
+        // --- Event Handlers ---
+
+        dom.btnTrigger.addEventListener('click', async () => {
+            if(!confirm('确定要开始自动索引吗？这可能会消耗大量 CPU 资源。')) return;
+            try {
+                await fetchAPI(`/repositories/${repoID}/index`, { method: 'POST' });
+                showToast('索引任务已启动');
+            } catch(e) {}
+        });
+
+        dom.btnRegisterZoekt.addEventListener('click', async () => {
+            const text = dom.zoektInput.value.trim();
+            if (!text) return alert('请输入索引文件路径');
+            
+            const paths = text.split('\n').map(p => p.trim()).filter(p => p);
+            if (paths.length === 0) return;
+
+            try {
+                await fetchAPI(`/repositories/${repoID}/zoekt-file`, {
+                    method: 'POST',
+                    body: JSON.stringify({ paths })
+                });
+                showToast(`成功导入 ${paths.length} 个索引文件`);
+                dom.zoektInput.value = '';
+            } catch(e) {}
+        });
+
+        dom.btnRegisterScip.addEventListener('click', async () => {
+            const path = dom.scipInput.value.trim();
+            if (!path) return alert('请输入 SCIP 文件路径');
+
+            try {
+                await fetchAPI(`/repositories/${repoID}/scip`, {
+                    method: 'POST',
+                    body: JSON.stringify({ path })
+                });
+                showToast('SCIP 索引注册成功');
+                dom.scipInput.value = '';
+            } catch(e) {}
+        });
+
+        init();
+    </script>
+</body>
+</html>

@@ -31,6 +31,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 func main() {
 	// 1. 定义命令行参数
 	dataDir := flag.String("data-dir", "./.data", "应用程序的全局数据目录 (包含数据库和仓库数据)")
+	adminToken := flag.String("admin-token", "", "管理 API 的鉴权 Token (如果为空则不开启鉴权)")
 	flag.Parse()
 
 	log.Printf("使用数据目录: %s", *dataDir)
@@ -74,11 +75,25 @@ func main() {
 	analysisService := analysis.NewService(repoProvider, zoektEngine, coreService)
 	analysisHandlers := &analysis.Handlers{Service: analysisService}
 
+	// 5.1 创建仓库管理 Handler
+	repoHandlers := &repo.Handlers{
+		Provider:   repoProvider,
+		AdminToken: *adminToken,
+	}
+
 	// 5. 创建路由器并集中注册所有服务的路由 (恢复简洁方式)
 	mux := http.NewServeMux()
 
 	// 静态文件服务
 	mux.Handle("GET /", http.FileServer(http.Dir("web"))) // Serve static files from web directory
+
+	// 仓库管理 API (受 AuthMiddleware 保护)
+	mux.HandleFunc("GET /api/admin/repositories", repoHandlers.AuthMiddleware(repoHandlers.HandleListAdmin))
+	mux.HandleFunc("POST /api/repositories", repoHandlers.AuthMiddleware(repoHandlers.HandleAdd))
+	mux.HandleFunc("DELETE /api/repositories/{id}", repoHandlers.AuthMiddleware(repoHandlers.HandleDelete))
+	mux.HandleFunc("POST /api/repositories/{id}/index", repoHandlers.AuthMiddleware(repoHandlers.HandleIndex))
+	mux.HandleFunc("POST /api/repositories/{id}/scip", repoHandlers.AuthMiddleware(repoHandlers.HandleRegisterScip))
+	mux.HandleFunc("POST /api/repositories/{id}/zoekt-file", repoHandlers.AuthMiddleware(repoHandlers.HandleRegisterZoekt))
 
 	// 核心文件浏览服务 (处理器内部解析 {id})
 	mux.HandleFunc("GET /api/repositories", coreHandlers.ListRepositories)
@@ -89,8 +104,8 @@ func main() {
 	mux.HandleFunc("GET /api/repositories/{id}/search", searchHandlers.SearchContent)
 	mux.HandleFunc("GET /api/repositories/{id}/search-files", searchHandlers.SearchFiles)
 
-    mux.HandleFunc("POST /api/intelligence/definitions", analysisHandlers.GetDefinitionHandler)
-    mux.HandleFunc("POST /api/intelligence/references", analysisHandlers.GetReferencesHandler)
+	mux.HandleFunc("POST /api/intelligence/definitions", analysisHandlers.GetDefinitionHandler)
+	mux.HandleFunc("POST /api/intelligence/references", analysisHandlers.GetReferencesHandler)
 
 	// 6. 配置并启动服务器
 	server := &http.Server{

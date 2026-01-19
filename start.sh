@@ -8,7 +8,7 @@ mkdir -p "$LOG_DIR"
 ./stop.sh >/dev/null 2>&1 || true
 
 echo "🚀 启动 repo-server..."
-nohup ./repo-server > "$LOG_DIR/repo-server.log" 2>&1 &
+nohup ./repo-server --admin-token "admin" > "$LOG_DIR/repo-server.log" 2>&1 &
 REPO_PID=$!
 echo $REPO_PID > "$LOG_DIR/repo-server.pid"
 echo "   PID: $REPO_PID"

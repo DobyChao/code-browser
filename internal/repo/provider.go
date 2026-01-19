@@ -3,6 +3,7 @@ package repo
 import (
 	"database/sql"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec" // Needed for running git and zoekt-git-index
@@ -338,6 +339,113 @@ func (p *Provider) IndexRepositoryZoekt(id uint32) error {
 	}
 
 	log.Printf("成功为仓库 '%s' (%d) 生成 Zoekt 索引 (名称: %s)，耗时: %v", repoInfo.Name, id, zoektName, time.Since(startTime))
+	return nil
+}
+
+// RegisterScipIndex 注册 SCIP 索引文件 (复制到仓库数据目录)
+func (p *Provider) RegisterScipIndex(id uint32, scipPath string) error {
+	repoInfo, ok := p.GetRepo(id)
+	if !ok {
+		return fmt.Errorf("仓库 ID '%d' 未找到", id)
+	}
+
+	targetDir := filepath.Join(repoInfo.DataPath, "scip")
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		return fmt.Errorf("创建 SCIP 目录失败: %w", err)
+	}
+	targetFile := filepath.Join(targetDir, "index.scip")
+
+	log.Printf("正在注册 SCIP 索引: %s -> %s", scipPath, targetFile)
+	return copyFile(scipPath, targetFile)
+}
+
+// RegisterZoektIndex 手动注册 Zoekt 索引文件 (复制到全局索引目录)
+// 支持注册多个文件，文件名必须符合 {ShardPrefix}.{ShardID}.zoekt 格式
+func (p *Provider) RegisterZoektIndex(id uint32, zoektPaths []string) error {
+	repoInfo, ok := p.GetRepo(id)
+	if !ok {
+		return fmt.Errorf("仓库 ID '%d' 未找到", id)
+	}
+
+	if len(zoektPaths) == 0 {
+		return nil
+	}
+
+	zoektIndexPath := filepath.Join(p.DataDir, zoektIndexSubDir)
+	if err := os.MkdirAll(zoektIndexPath, 0755); err != nil {
+		return fmt.Errorf("创建 Zoekt 索引目录失败: %w", err)
+	}
+
+	// 生成标准化的文件名前缀: id(10位)_name
+	reg := regexp.MustCompile("[^a-zA-Z0-9]+")
+	sanitizedName := reg.ReplaceAllString(repoInfo.Name, "_")
+	targetPrefix := fmt.Sprintf("%010d_%s", id, sanitizedName)
+
+	// 1. 删除旧的索引文件 (以 targetPrefix 开头的所有 .zoekt 文件)
+	entries, err := os.ReadDir(zoektIndexPath)
+	if err != nil {
+		return fmt.Errorf("读取索引目录失败: %w", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasPrefix(entry.Name(), targetPrefix) && strings.HasSuffix(entry.Name(), ".zoekt") {
+			oldPath := filepath.Join(zoektIndexPath, entry.Name())
+			if err := os.Remove(oldPath); err != nil {
+				log.Printf("警告: 无法删除旧索引文件 '%s': %v", oldPath, err)
+			} else {
+				log.Printf("已删除旧索引文件: %s", entry.Name())
+			}
+		}
+	}
+
+	// 2. 复制新文件
+	for _, srcPath := range zoektPaths {
+		// 检查源文件名是否符合 Zoekt 分片格式
+		baseName := filepath.Base(srcPath)
+		// 预期格式: 任意前缀.00000.zoekt
+		// 我们需要提取后缀 .00000.zoekt
+		
+		// 简单处理: 查找倒数第二个点，保留后缀
+		parts := strings.Split(baseName, ".")
+		var suffix string
+		if len(parts) >= 3 && parts[len(parts)-1] == "zoekt" {
+			// 假设最后两部分是 shardID.zoekt (例如 .00000.zoekt)
+			suffix = "." + parts[len(parts)-2] + "." + parts[len(parts)-1]
+		} else {
+			// 如果不符合标准分片格式，默认使用 .00000.zoekt (但这可能会导致多文件冲突，如果用户上传了多个不带分片号的文件)
+			// 为了支持用户手动指定的不带分片号的文件，我们可以简单地按顺序分配
+			// 但这里假设用户上传的是 zoekt-git-index 生成的标准文件
+			return fmt.Errorf("文件名 '%s' 不符合 Zoekt 分片格式 (例如 .00000.zoekt)", baseName)
+		}
+
+		targetName := targetPrefix + suffix
+		targetFile := filepath.Join(zoektIndexPath, targetName)
+
+		log.Printf("正在手动注册 Zoekt 索引: %s -> %s", srcPath, targetFile)
+		if err := copyFile(srcPath, targetFile); err != nil {
+			return fmt.Errorf("复制文件 '%s' 失败: %w", srcPath, err)
+		}
+	}
+
+	return nil
+}
+
+// copyFile 辅助函数：复制文件
+func copyFile(src, dst string) error {
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("打开源文件失败: %w", err)
+	}
+	defer sourceFile.Close()
+
+	destFile, err := os.Create(dst)
+	if err != nil {
+		return fmt.Errorf("创建目标文件失败: %w", err)
+	}
+	defer destFile.Close()
+
+	if _, err := io.Copy(destFile, sourceFile); err != nil {
+		return fmt.Errorf("复制文件内容失败: %w", err)
+	}
 	return nil
 }
 

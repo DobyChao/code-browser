@@ -2,13 +2,15 @@ package core
 
 import (
 	"fmt"
+	"io"
 	"log"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"code-browser/internal/repo"
+
+	"github.com/go-git/go-git/v5"
 	"github.com/patrickmn/go-cache"
 )
 
@@ -59,6 +61,7 @@ func (s *Service) ListRepositories() ([]RepositoryInfo, error) {
 }
 
 // GetTree 获取指定仓库和路径下的文件树（带缓存）
+// 使用 go-git 读取 HEAD commit 中的文件树，天然支持 gitignore 且不依赖本地文件系统状态
 func (s *Service) GetTree(repoID uint32, relPath string) ([]FileInfo, error) {
 	cacheKey := fmt.Sprintf("tree:%d:%s", repoID, relPath)
 	if data, found := s.Cache.Get(cacheKey); found {
@@ -70,37 +73,73 @@ func (s *Service) GetTree(repoID uint32, relPath string) ([]FileInfo, error) {
 		return nil, fmt.Errorf("仓库 ID '%d' 未找到", repoID)
 	}
 
-	targetPath := filepath.Join(repoInfo.SourcePath, relPath)
-	absRepoPath, _ := filepath.Abs(repoInfo.SourcePath)
-	absTargetPath, err := filepath.Abs(targetPath)
+	// 1. 打开 Git 仓库
+	r, err := git.PlainOpen(repoInfo.SourcePath)
 	if err != nil {
-		return nil, fmt.Errorf("无效的路径: %w", err)
-	}
-	if !strings.HasPrefix(absTargetPath, absRepoPath) {
-		return nil, fmt.Errorf("禁止访问仓库外的路径")
+		return nil, fmt.Errorf("打开 Git 仓库失败: %w", err)
 	}
 
-	entries, err := os.ReadDir(targetPath)
+	// 2. 获取 HEAD 引用
+	ref, err := r.Head()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("获取 HEAD 引用失败: %w", err)
 	}
 
+	// 3. 获取 HEAD 指向的 Commit 对象
+	commit, err := r.CommitObject(ref.Hash())
+	if err != nil {
+		return nil, fmt.Errorf("获取 Commit 对象失败: %w", err)
+	}
+
+	// 4. 获取 Commit 对应的 Tree
+	tree, err := commit.Tree()
+	if err != nil {
+		return nil, fmt.Errorf("获取 Tree 失败: %w", err)
+	}
+
+	// 5. 如果请求的是子目录，需要找到对应的子 Tree
+	targetTree := tree
+	cleanRelPath := filepath.Clean(relPath)
+	if cleanRelPath != "." && cleanRelPath != "" {
+		// 注意: git tree 使用 forward slash '/' 作为分隔符，即使在 Windows 上
+		// relPath 应该是相对根目录的路径，不包含前导 /
+		gitPath := filepath.ToSlash(cleanRelPath)
+		gitPath = strings.TrimPrefix(gitPath, "/")
+
+		entry, err := tree.FindEntry(gitPath)
+		if err != nil {
+			// 如果找不到路径，或者路径不是一个目录，返回错误或空列表
+			// object.ErrEntryNotFound
+			return nil, fmt.Errorf("路径 '%s' 在 HEAD 中未找到: %w", gitPath, err)
+		}
+
+		if entry.Mode != 16384 && entry.Mode.String() != "040000" {
+			return nil, fmt.Errorf("路径 '%s' 不是一个目录", gitPath)
+		}
+
+		targetTree, err = tree.Tree(gitPath)
+		if err != nil {
+			return nil, fmt.Errorf("获取子 Tree 失败: %w", err)
+		}
+	}
+
+	// 6. 遍历目标 Tree 的直接子节点 (Entries)
 	var files []FileInfo
-	for _, entry := range entries {
+	for _, entry := range targetTree.Entries {
 		fileType := "file"
-		if entry.IsDir() {
+		// Git Mode 检查: 16384 (040000) 是目录, 33188 (0100644) 是文件
+		if entry.Mode == 16384 || entry.Mode.String() == "040000" || !entry.Mode.IsFile() {
 			fileType = "directory"
 		}
-		entryRelativePath := filepath.Join(relPath, entry.Name())
+
+		// 构建相对路径用于前端导航
+		entryPath := filepath.Join(relPath, entry.Name)
+
 		files = append(files, FileInfo{
-			Name: entry.Name(),
-			Path: filepath.ToSlash(entryRelativePath),
+			Name: entry.Name,
+			Path: filepath.ToSlash(entryPath),
 			Type: fileType,
 		})
-	}
-
-	if files == nil {
-		files = make([]FileInfo, 0)
 	}
 
 	s.Cache.Set(cacheKey, files, cache.DefaultExpiration)
@@ -122,31 +161,64 @@ func (s *Service) GetFileContent(repoID uint32, relPath string) ([]byte, string,
 		return nil, "", fmt.Errorf("仓库 ID '%d' 未找到", repoID)
 	}
 
-	targetPath := filepath.Join(repoInfo.SourcePath, relPath)
-	absRepoPath, _ := filepath.Abs(repoInfo.SourcePath)
-	absTargetPath, err := filepath.Abs(targetPath)
+	// 1. 打开 Git 仓库
+	r, err := git.PlainOpen(repoInfo.SourcePath)
 	if err != nil {
-		return nil, "", fmt.Errorf("无效的文件路径: %w", err)
-	}
-	if !strings.HasPrefix(absTargetPath, absRepoPath) {
-		return nil, "", fmt.Errorf("禁止访问仓库外的路径")
-	}
-	// Prevent reading root dir as blob
-	if absTargetPath == absRepoPath && relPath == "" {
-		return nil, "", fmt.Errorf("禁止读取仓库根目录作为文件")
+		return nil, "", fmt.Errorf("打开 Git 仓库失败: %w", err)
 	}
 
-	info, err := os.Stat(targetPath)
+	// 2. 获取 HEAD 引用
+	ref, err := r.Head()
 	if err != nil {
-		return nil, "", err
-	}
-	if info.IsDir() {
-		return nil, "", fmt.Errorf("路径是一个目录")
+		return nil, "", fmt.Errorf("获取 HEAD 引用失败: %w", err)
 	}
 
-	content, err := os.ReadFile(targetPath)
+	// 3. 获取 HEAD 指向的 Commit 对象
+	commit, err := r.CommitObject(ref.Hash())
 	if err != nil {
-		return nil, "", fmt.Errorf("读取文件失败: %w", err)
+		return nil, "", fmt.Errorf("获取 Commit 对象失败: %w", err)
+	}
+
+	// 4. 获取对应的 Tree
+	tree, err := commit.Tree()
+	if err != nil {
+		return nil, "", fmt.Errorf("获取 Tree 失败: %w", err)
+	}
+
+	// 5. 查找文件 Entry
+	cleanRelPath := filepath.Clean(relPath)
+	gitPath := filepath.ToSlash(cleanRelPath)
+	gitPath = strings.TrimPrefix(gitPath, "/")
+
+	entry, err := tree.FindEntry(gitPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("文件 '%s' 未找到: %w", gitPath, err)
+	}
+
+	if !entry.Mode.IsFile() {
+		return nil, "", fmt.Errorf("路径 '%s' 不是一个文件", gitPath)
+	}
+
+	// 6. 获取 Blob 对象并读取内容
+	blob, err := tree.TreeEntryFile(entry)
+	if err != nil {
+		// 某些特殊对象（如 submodule）可能无法作为 blob 读取，这里简单处理
+		// 尝试直接通过 Hash 获取 Blob
+		blob, err = commit.File(gitPath)
+		if err != nil {
+			return nil, "", fmt.Errorf("获取文件 Blob 失败: %w", err)
+		}
+	}
+
+	reader, err := blob.Reader()
+	if err != nil {
+		return nil, "", fmt.Errorf("创建 Blob Reader 失败: %w", err)
+	}
+	defer reader.Close()
+
+	content, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, "", fmt.Errorf("读取 Blob 内容失败: %w", err)
 	}
 
 	// Detect Content-Type
@@ -155,11 +227,11 @@ func (s *Service) GetFileContent(repoID uint32, relPath string) ([]byte, string,
 	// text/plain is usually safer/better unless it's an image.
 	// Let's stick to text/plain for code.
 
-	entry := blobCacheEntry{
+	entryCache := blobCacheEntry{
 		Content:     content,
 		ContentType: contentType,
 	}
-	s.Cache.Set(cacheKey, entry, cache.DefaultExpiration)
+	s.Cache.Set(cacheKey, entryCache, cache.DefaultExpiration)
 
 	return content, contentType, nil
 }

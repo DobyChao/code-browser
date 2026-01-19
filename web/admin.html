@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Browser 管理后台</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root { --main-bg: #1a202c; --card-bg: #2d3748; --border-color: #4a5568; --text-color: #e2e8f0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: var(--main-bg); color: var(--text-color); }
+        .card { background-color: var(--card-bg); border-radius: 0.5rem; padding: 1.5rem; margin-bottom: 1.5rem; }
+        .input-dark { background-color: #4a5568; border: 1px solid #718096; color: white; padding: 0.5rem; border-radius: 0.25rem; width: 100%; }
+        .btn { padding: 0.5rem 1rem; border-radius: 0.25rem; font-weight: bold; cursor: pointer; transition: background-color 0.2s; }
+        .btn-primary { background-color: #4299e1; color: white; }
+        .btn-primary:hover { background-color: #3182ce; }
+        .btn-danger { background-color: #e53e3e; color: white; }
+        .btn-danger:hover { background-color: #c53030; }
+        .btn-secondary { background-color: #718096; color: white; }
+        .btn-secondary:hover { background-color: #4a5568; }
+        #toast { visibility: hidden; min-width: 250px; margin-left: -125px; background-color: #333; color: #fff; text-align: center; border-radius: 4px; padding: 16px; position: fixed; z-index: 50; left: 50%; bottom: 30px; opacity: 0; transition: opacity 0.5s; }
+        #toast.show { visibility: visible; opacity: 1; }
+        .modal { display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.5); }
+        .modal-content { background-color: var(--card-bg); margin: 15% auto; padding: 20px; border: 1px solid #888; width: 50%; border-radius: 8px; }
+    </style>
+</head>
+<body class="p-8">
+
+    <!-- Login Section -->
+    <div id="login-section" class="max-w-md mx-auto mt-20 card text-center" style="display: none;">
+        <h2 class="text-2xl mb-4">管理员登录</h2>
+        <input type="password" id="admin-token-input" class="input-dark mb-4" placeholder="请输入 Admin Token">
+        <button id="login-btn" class="btn btn-primary w-full">登录</button>
+    </div>
+
+    <!-- Dashboard Section -->
+    <div id="dashboard-section" class="max-w-6xl mx-auto" style="display: none;">
+        <header class="flex justify-between items-center mb-8 pb-4 border-b border-gray-600">
+            <h1 class="text-3xl font-bold">Code Browser 管理后台</h1>
+            <div>
+                <a href="/" class="text-blue-400 hover:text-blue-300 mr-4">← 返回搜索页</a>
+                <button id="logout-btn" class="text-gray-400 hover:text-white">退出登录</button>
+            </div>
+        </header>
+
+        <!-- Add Repo Card -->
+        <div class="card">
+            <h2 class="text-xl mb-4 font-semibold">添加新仓库</h2>
+            <form id="add-repo-form" class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                <div>
+                    <label class="block text-sm mb-1">ID (数字)</label>
+                    <input type="number" id="new-repo-id" class="input-dark" required>
+                </div>
+                <div>
+                    <label class="block text-sm mb-1">名称</label>
+                    <input type="text" id="new-repo-name" class="input-dark" placeholder="my-repo" required>
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm mb-1">源码绝对路径</label>
+                    <input type="text" id="new-repo-path" class="input-dark" placeholder="/path/to/source" required>
+                </div>
+                <div class="md:col-span-4 text-right mt-2">
+                    <button type="submit" class="btn btn-primary">添加仓库</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Repo List -->
+        <div class="card">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold">仓库列表</h2>
+                <button id="refresh-btn" class="btn btn-secondary text-sm">刷新</button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="text-gray-400 border-b border-gray-600">
+                            <th class="p-3">ID</th>
+                            <th class="p-3">名称</th>
+                            <th class="p-3">路径</th>
+                            <th class="p-3 text-center">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="repo-table-body">
+                        <!-- Rows will be injected here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast"></div>
+
+    <script>
+        const API_BASE = 'http://localhost:8088/api';
+        
+        const state = {
+            token: localStorage.getItem('adminToken') || '',
+            repos: []
+        };
+
+        const dom = {
+            loginSection: document.getElementById('login-section'),
+            dashboardSection: document.getElementById('dashboard-section'),
+            tokenInput: document.getElementById('admin-token-input'),
+            loginBtn: document.getElementById('login-btn'),
+            logoutBtn: document.getElementById('logout-btn'),
+            repoTableBody: document.getElementById('repo-table-body'),
+            addRepoForm: document.getElementById('add-repo-form'),
+            refreshBtn: document.getElementById('refresh-btn'),
+            toast: document.getElementById('toast')
+        };
+
+        // --- Auth Logic ---
+        function checkAuth() {
+            if (state.token) {
+                showDashboard();
+            } else {
+                showLogin();
+            }
+        }
+
+        function showLogin() {
+            dom.loginSection.style.display = 'block';
+            dom.dashboardSection.style.display = 'none';
+        }
+
+        function showDashboard() {
+            dom.loginSection.style.display = 'none';
+            dom.dashboardSection.style.display = 'block';
+            fetchRepos();
+        }
+
+        dom.loginBtn.addEventListener('click', () => {
+            const token = dom.tokenInput.value.trim();
+            if (token) {
+                state.token = token;
+                localStorage.setItem('adminToken', token);
+                checkAuth();
+            }
+        });
+
+        dom.logoutBtn.addEventListener('click', () => {
+            state.token = '';
+            localStorage.removeItem('adminToken');
+            checkAuth();
+        });
+
+        // --- API Helpers ---
+        async function fetchAPI(endpoint, options = {}) {
+            const headers = {
+                'Content-Type': 'application/json',
+                ...options.headers
+            };
+            
+            if (state.token) {
+                headers['Authorization'] = `Bearer ${state.token}`;
+            }
+
+            try {
+                const res = await fetch(`${API_BASE}${endpoint}`, { ...options, headers });
+                if (res.status === 401) {
+                    showToast('鉴权失败，请重新登录');
+                    dom.logoutBtn.click();
+                    return null;
+                }
+                if (!res.ok) {
+                    const text = await res.text();
+                    throw new Error(text || `HTTP ${res.status}`);
+                }
+                return res; // Return raw response for flexibility
+            } catch (err) {
+                showToast(`请求失败: ${err.message}`);
+                throw err;
+            }
+        }
+
+        // --- Core Logic ---
+        async function fetchRepos() {
+            try {
+                const res = await fetchAPI('/admin/repositories');
+                if (!res) return;
+                state.repos = await res.json();
+                renderRepos();
+            } catch (e) { console.error(e); }
+        }
+
+        function renderRepos() {
+            dom.repoTableBody.innerHTML = state.repos.map(repo => `
+                <tr class="border-b border-gray-700 hover:bg-gray-700 cursor-pointer" onclick="actions.viewDetails(${repo.id})">
+                    <td class="p-3">${repo.id}</td>
+                    <td class="p-3 font-bold text-blue-300">${repo.name}</td>
+                    <td class="p-3 text-sm text-gray-400 font-mono truncate max-w-xs" title="${repo.path}">${repo.path || '(路径未公开)'}</td>
+                    <td class="p-3 text-center">
+                        <button onclick="event.stopPropagation(); actions.deleteRepo(${repo.id})" class="text-xs bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded">删除</button>
+                    </td>
+                </tr>
+            `).join('');
+            
+            if (state.repos.length === 0) {
+                dom.repoTableBody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-gray-500">暂无仓库</td></tr>`;
+            }
+        }
+
+        dom.addRepoForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = parseInt(document.getElementById('new-repo-id').value);
+            const name = document.getElementById('new-repo-name').value;
+            const path = document.getElementById('new-repo-path').value;
+
+            try {
+                await fetchAPI('/repositories', {
+                    method: 'POST',
+                    body: JSON.stringify({ id, name, path })
+                });
+                showToast('仓库添加成功');
+                dom.addRepoForm.reset();
+                fetchRepos();
+            } catch (e) { /* handled by fetchAPI */ }
+        });
+
+        dom.refreshBtn.addEventListener('click', fetchRepos);
+
+        // --- Actions ---
+        window.actions = {
+            viewDetails(id) {
+                window.location.href = `/admin-repo-detail.html?id=${id}`;
+            },
+            async deleteRepo(id) {
+                if (!confirm(`确定要删除仓库 ID ${id} 吗？`)) return;
+                try {
+                    await fetchAPI(`/repositories/${id}`, { method: 'DELETE' });
+                    showToast('仓库已删除');
+                    fetchRepos();
+                } catch (e) {}
+            }
+        };
+
+        function showToast(msg) {
+            dom.toast.textContent = msg;
+            dom.toast.classList.add("show");
+            setTimeout(() => { dom.toast.classList.remove("show"); }, 3000);
+        }
+
+        // Init
+        checkAuth();
+
+    </script>
+</body>
+</html>
