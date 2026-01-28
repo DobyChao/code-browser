@@ -86,16 +86,78 @@
                 </table>
             </div>
         </div>
+
+        <!-- Feedback List -->
+        <div class="card">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold">用户反馈 (Issues)</h2>
+                <button id="refresh-feedback-btn" class="btn btn-secondary text-sm">刷新</button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="text-gray-400 border-b border-gray-600">
+                            <th class="p-3">ID</th>
+                            <th class="p-3">类型</th>
+                            <th class="p-3">标题</th>
+                            <th class="p-3">状态</th>
+                            <th class="p-3">时间</th>
+                            <th class="p-3 text-center">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="feedback-table-body">
+                        <!-- Feedback rows will be injected here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
 
     <div id="toast"></div>
+
+    <!-- Feedback Detail Modal -->
+    <div id="feedback-modal" class="modal">
+        <div class="modal-content relative">
+            <span class="close-modal absolute top-4 right-4 text-gray-400 hover:text-white cursor-pointer text-2xl">&times;</span>
+            <h2 id="modal-title" class="text-2xl font-bold mb-4 border-b border-gray-600 pb-2">Feedback Detail</h2>
+            <div class="space-y-4">
+                <div>
+                    <label class="text-sm text-gray-400">Type</label>
+                    <div id="modal-type" class="font-semibold"></div>
+                </div>
+                <div>
+                    <label class="text-sm text-gray-400">Status</label>
+                    <div id="modal-status"></div>
+                </div>
+                <div>
+                    <label class="text-sm text-gray-400">Description</label>
+                    <div id="modal-desc" class="bg-gray-800 p-3 rounded mt-1 whitespace-pre-wrap"></div>
+                </div>
+                <div>
+                    <label class="text-sm text-gray-400">Contact</label>
+                    <div id="modal-email"></div>
+                </div>
+                <div>
+                    <label class="text-sm text-gray-400">Context</label>
+                    <div id="modal-context" class="bg-gray-800 p-3 rounded mt-1 text-sm font-mono overflow-x-auto"></div>
+                </div>
+                <div class="text-xs text-gray-500 mt-4">
+                    Submitted at: <span id="modal-time"></span>
+                </div>
+            </div>
+            <div class="mt-6 text-right">
+                 <button id="modal-close-btn" class="btn btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
 
     <script>
         const API_BASE = 'http://localhost:8088/api';
         
         const state = {
             token: localStorage.getItem('adminToken') || '',
-            repos: []
+            repos: [],
+            feedbacks: []
         };
 
         const dom = {
@@ -107,7 +169,11 @@
             repoTableBody: document.getElementById('repo-table-body'),
             addRepoForm: document.getElementById('add-repo-form'),
             refreshBtn: document.getElementById('refresh-btn'),
-            toast: document.getElementById('toast')
+            feedbackTableBody: document.getElementById('feedback-table-body'),
+            refreshFeedbackBtn: document.getElementById('refresh-feedback-btn'),
+            toast: document.getElementById('toast'),
+            modal: document.getElementById('feedback-modal'),
+            modalCloseBtns: document.querySelectorAll('.close-modal, #modal-close-btn')
         };
 
         // --- Auth Logic ---
@@ -128,6 +194,7 @@
             dom.loginSection.style.display = 'none';
             dom.dashboardSection.style.display = 'block';
             fetchRepos();
+            fetchFeedbacks();
         }
 
         dom.loginBtn.addEventListener('click', () => {
@@ -184,6 +251,15 @@
             } catch (e) { console.error(e); }
         }
 
+        async function fetchFeedbacks() {
+            try {
+                const res = await fetchAPI('/admin/feedbacks');
+                if (!res) return;
+                state.feedbacks = await res.json();
+                renderFeedbacks();
+            } catch (e) { console.error(e); }
+        }
+
         function renderRepos() {
             dom.repoTableBody.innerHTML = state.repos.map(repo => `
                 <tr class="border-b border-gray-700 hover:bg-gray-700 cursor-pointer" onclick="actions.viewDetails(${repo.id})">
@@ -198,6 +274,35 @@
             
             if (state.repos.length === 0) {
                 dom.repoTableBody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-gray-500">暂无仓库</td></tr>`;
+            }
+        }
+
+        function renderFeedbacks() {
+            const statusColors = {
+                'open': 'text-green-400',
+                'closed': 'text-gray-500',
+                'in_progress': 'text-yellow-400'
+            };
+
+            dom.feedbackTableBody.innerHTML = state.feedbacks.map(f => `
+                <tr class="border-b border-gray-700 hover:bg-gray-700 cursor-pointer" onclick="actions.viewFeedbackDetails(${f.id})">
+                    <td class="p-3 text-sm">${f.id}</td>
+                    <td class="p-3 text-sm"><span class="bg-gray-700 px-2 py-1 rounded text-xs">${f.type}</span></td>
+                    <td class="p-3 font-medium text-white">${f.title}</td>
+                    <td class="p-3 text-sm ${statusColors[f.status] || 'text-white'}">${f.status}</td>
+                    <td class="p-3 text-xs text-gray-400">${new Date(f.created_at).toLocaleString()}</td>
+                    <td class="p-3 text-center space-x-2" onclick="event.stopPropagation()">
+                        ${f.status === 'open' 
+                            ? `<button onclick="actions.updateFeedbackStatus(${f.id}, 'closed')" class="text-xs bg-yellow-600 hover:bg-yellow-700 text-white px-2 py-1 rounded">Close</button>`
+                            : `<button onclick="actions.updateFeedbackStatus(${f.id}, 'open')" class="text-xs bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded">Reopen</button>`
+                        }
+                        <button onclick="actions.deleteFeedback(${f.id})" class="text-xs bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded">删除</button>
+                    </td>
+                </tr>
+            `).join('');
+
+            if (state.feedbacks.length === 0) {
+                dom.feedbackTableBody.innerHTML = `<tr><td colspan="6" class="p-4 text-center text-gray-500">暂无反馈</td></tr>`;
             }
         }
 
@@ -219,6 +324,19 @@
         });
 
         dom.refreshBtn.addEventListener('click', fetchRepos);
+        dom.refreshFeedbackBtn.addEventListener('click', fetchFeedbacks);
+
+        dom.modalCloseBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                dom.modal.style.display = "none";
+            });
+        });
+
+        window.onclick = function(event) {
+            if (event.target == dom.modal) {
+                dom.modal.style.display = "none";
+            }
+        }
 
         // --- Actions ---
         window.actions = {
@@ -232,6 +350,45 @@
                     showToast('仓库已删除');
                     fetchRepos();
                 } catch (e) {}
+            },
+            async updateFeedbackStatus(id, status) {
+                try {
+                    await fetchAPI(`/admin/feedbacks/${id}`, {
+                        method: 'PATCH',
+                        body: JSON.stringify({ status })
+                    });
+                    showToast(`反馈状态已更新为 ${status}`);
+                    fetchFeedbacks();
+                } catch (e) {}
+            },
+            async deleteFeedback(id) {
+                if (!confirm(`确定要删除反馈 ID ${id} 吗？`)) return;
+                try {
+                    await fetchAPI(`/admin/feedbacks/${id}`, { method: 'DELETE' });
+                    showToast('反馈已删除');
+                    fetchFeedbacks();
+                } catch (e) {}
+            },
+            viewFeedbackDetails(id) {
+                const feedback = state.feedbacks.find(f => f.id === id);
+                if (!feedback) return;
+
+                document.getElementById('modal-title').textContent = feedback.title;
+                document.getElementById('modal-type').textContent = feedback.type;
+                document.getElementById('modal-status').textContent = feedback.status;
+                document.getElementById('modal-desc').textContent = feedback.description;
+                document.getElementById('modal-email').textContent = feedback.email || 'N/A';
+                document.getElementById('modal-time').textContent = new Date(feedback.created_at).toLocaleString();
+                
+                const contextDiv = document.getElementById('modal-context');
+                if (feedback.context) {
+                    contextDiv.textContent = JSON.stringify(feedback.context, null, 2);
+                    contextDiv.parentElement.style.display = 'block';
+                } else {
+                    contextDiv.parentElement.style.display = 'none';
+                }
+
+                dom.modal.style.display = "block";
             }
         };
 

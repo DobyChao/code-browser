@@ -8,6 +8,7 @@ import (
 
 	"code-browser/internal/analysis"
 	"code-browser/internal/core"
+	"code-browser/internal/feedback"
 	"code-browser/internal/repo"
 	"code-browser/internal/search"
 
@@ -106,6 +107,18 @@ func main() {
 
 	mux.HandleFunc("POST /api/intelligence/definitions", analysisHandlers.GetDefinitionHandler)
 	mux.HandleFunc("POST /api/intelligence/references", analysisHandlers.GetReferencesHandler)
+
+	// Feedback API
+	feedbackService, err := feedback.NewService(repoProvider.GetDB())
+	if err != nil {
+		log.Printf("Warning: Failed to initialize feedback service: %v", err)
+	} else {
+		feedbackHandler := feedback.NewHandler(feedbackService, *adminToken)
+		mux.HandleFunc("POST /api/feedback", feedbackHandler.HandleSubmit)
+		mux.HandleFunc("GET /api/admin/feedbacks", feedbackHandler.AuthMiddleware(feedbackHandler.HandleList))
+		mux.HandleFunc("PATCH /api/admin/feedbacks/{id}", feedbackHandler.AuthMiddleware(feedbackHandler.HandleUpdateStatus))
+		mux.HandleFunc("DELETE /api/admin/feedbacks/{id}", feedbackHandler.AuthMiddleware(feedbackHandler.HandleDelete))
+	}
 
 	// 6. 配置并启动服务器
 	server := &http.Server{

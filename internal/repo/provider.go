@@ -474,6 +474,11 @@ func (p *Provider) Count() int {
 	return len(p.repositories)
 }
 
+// GetDB 返回底层的数据库连接
+func (p *Provider) GetDB() *sql.DB {
+	return p.db
+}
+
 // Close 关闭数据库连接 (应用退出时调用)
 func (p *Provider) Close() error {
 	if p.db != nil {
