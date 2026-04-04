@@ -168,6 +168,59 @@ func (p *Provider) ListIndexJobs(repoID uint32, limit int) ([]IndexJob, error) {
 	return jobs, nil
 }
 
+// ListAllIndexJobs 获取所有仓库的索引任务列表（支持按 repo_id 可选过滤），按 created_at DESC 排序
+func (p *Provider) ListAllIndexJobs(repoID *uint32, limit int) ([]IndexJob, error) {
+	var rows *sql.Rows
+	var err error
+
+	if repoID != nil {
+		rows, err = p.db.Query(
+			`SELECT id, repo_id, type, status, trigger_type, error, started_at, completed_at, created_at
+			 FROM index_jobs WHERE repo_id = ? ORDER BY created_at DESC LIMIT ?`,
+			*repoID, limit,
+		)
+	} else {
+		rows, err = p.db.Query(
+			`SELECT id, repo_id, type, status, trigger_type, error, started_at, completed_at, created_at
+			 FROM index_jobs ORDER BY created_at DESC LIMIT ?`,
+			limit,
+		)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("查询索引任务列表失败: %w", err)
+	}
+	defer rows.Close()
+
+	var jobs []IndexJob
+	for rows.Next() {
+		var job IndexJob
+		var startedAt, completedAt sql.NullTime
+		var errMsg sql.NullString
+
+		if err := rows.Scan(&job.ID, &job.RepoID, &job.Type, &job.Status, &job.TriggerType, &errMsg, &startedAt, &completedAt, &job.CreatedAt); err != nil {
+			return nil, fmt.Errorf("扫描索引任务行失败: %w", err)
+		}
+
+		if errMsg.Valid {
+			job.Error = errMsg.String
+		}
+		if startedAt.Valid {
+			job.StartedAt = &startedAt.Time
+		}
+		if completedAt.Valid {
+			job.CompletedAt = &completedAt.Time
+		}
+
+		jobs = append(jobs, job)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("迭代索引任务行失败: %w", err)
+	}
+
+	return jobs, nil
+}
+
 // GetLatestIndexStatus 返回指定仓库的最新索引状态
 // 如果仓库没有 index_status 字段，返回 "none"
 func (p *Provider) GetLatestIndexStatus(repoID uint32) (string, error) {
