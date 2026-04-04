@@ -23,6 +23,7 @@ func main() {
 	repoName := flag.String("name", "", "'add' 命令: 仓库的显示名称 (必填)")
 	repoPath := flag.String("path", "", "'add' 命令: 仓库源代码的绝对路径 (必填)")
 	scipPath := flag.String("scip-path", "", "SCIP 索引文件路径 (register-scip 必填)")
+	jobID := flag.Uint("job-id", 0, "索引任务 ID (用于 'status' 命令)")
 	// Flags for 'delete' command
 	// --- Parse Flags ---
 	flag.Parse()
@@ -112,8 +113,47 @@ func main() {
 		}
 		fmt.Printf("成功注册 SCIP 索引到: %s\n", targetFile)
 
+	case "status":
+		if *repoID == 0 {
+			fmt.Fprintln(os.Stderr, "错误: 'status' 命令需要 -id 参数。")
+			os.Exit(1)
+		}
+
+		status, err := repoProvider.GetLatestIndexStatus(uint32(*repoID))
+		if err != nil {
+			log.Fatalf("错误: 查询索引状态失败: %v", err)
+		}
+		fmt.Printf("仓库 %d 索引状态: %s\n", *repoID, status)
+
+		jobs, err := repoProvider.ListIndexJobs(uint32(*repoID), 5)
+		if err != nil {
+			log.Fatalf("错误: 查询索引任务失败: %v", err)
+		}
+		if len(jobs) > 0 {
+			fmt.Println("\n最近索引任务:")
+			for _, job := range jobs {
+				statusIcon := "?"
+				switch job.Status {
+				case "completed":
+					statusIcon = "OK"
+				case "running":
+					statusIcon = ".."
+				case "failed":
+					statusIcon = "!!"
+				case "pending":
+					statusIcon = "--"
+				}
+				fmt.Printf("  [%s] #%d %s (trigger: %s) %s\n",
+					statusIcon, job.ID, job.Status, job.TriggerType, job.CreatedAt.Format("2006-01-02 15:04:05"))
+				if job.Error != "" {
+					fmt.Printf("       错误: %s\n", job.Error)
+				}
+			}
+		}
+
+		_ = jobID // reserved for future use
 	default:
-		fmt.Println("未知命令。可用: add, delete, index, register-scip")
+		fmt.Println("未知命令。可用: add, delete, index, register-scip, status")
 		os.Exit(1)
 	}
 }
