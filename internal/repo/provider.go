@@ -20,13 +20,17 @@ import (
 
 // Repository 定义了单个代码仓库的配置结构 (与数据库表对应)
 type Repository struct {
-	DBID       int64     `json:"-"`    // 数据库内部自增 ID
-	RepoID     uint32    `json:"id"`   // 用户定义的、API 使用的唯一 uint32 ID
-	Name       string    `json:"name"` // 显示给用户的名称
-	SourcePath string    `json:"-"`    // 仓库在文件系统中的绝对路径
-	DataPath   string    `json:"-"`    // 该仓库专属数据目录的路径
-	CreatedAt  time.Time `json:"-"`    // 创建时间
-	UpdatedAt  time.Time `json:"-"`    // 更新时间
+	DBID          int64      `json:"-"`              // 数据库内部自增 ID
+	RepoID        uint32     `json:"id"`             // 用户定义的、API 使用的唯一 uint32 ID
+	Name          string     `json:"name"`           // 显示给用户的名称
+	SourcePath    string     `json:"-"`              // 仓库在文件系统中的绝对路径
+	DataPath      string     `json:"-"`              // 该仓库专属数据目录的路径
+	RemoteURL     string     `json:"remote_url"`     // 仓库远程 URL
+	DefaultBranch string     `json:"default_branch"` // 默认分支
+	IndexStatus   string     `json:"index_status"`   // 索引状态
+	LastIndexedAt *time.Time `json:"last_indexed_at"` // 最后索引时间
+	CreatedAt     time.Time  `json:"-"`              // 创建时间
+	UpdatedAt     time.Time  `json:"-"`              // 更新时间
 }
 
 // Provider 是仓库管理服务，负责加载和提供仓库信息
@@ -78,6 +82,11 @@ func NewProvider(dataDir string) (*Provider, error) {
 		return nil, fmt.Errorf("初始化数据库 schema 失败: %w", err)
 	}
 
+	if err := p.migrate(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("数据库迁移失败: %w", err)
+	}
+
 	// Load initial data from DB into memory cache
 	if err := p.loadReposFromDB(); err != nil {
 		db.Close()
@@ -108,9 +117,37 @@ func (p *Provider) initSchema() error {
 	BEGIN
 		UPDATE repositories SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
 	END;
+
+	CREATE TABLE IF NOT EXISTS index_jobs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		repo_id INTEGER NOT NULL,
+		type TEXT NOT NULL DEFAULT 'zoekt',
+		status TEXT NOT NULL DEFAULT 'pending',
+		trigger_type TEXT NOT NULL DEFAULT 'manual',
+		error TEXT,
+		started_at DATETIME,
+		completed_at DATETIME,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (repo_id) REFERENCES repositories(repo_id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_index_jobs_repo ON index_jobs(repo_id);
 	`
 	_, err := p.db.Exec(query)
 	return err
+}
+
+// migrate 执行数据库迁移，添加新列 (忽略已存在的列)
+func (p *Provider) migrate() error {
+	migrations := []string{
+		`ALTER TABLE repositories ADD COLUMN last_indexed_at DATETIME`,
+		`ALTER TABLE repositories ADD COLUMN index_status TEXT DEFAULT 'none'`,
+		`ALTER TABLE repositories ADD COLUMN remote_url TEXT`,
+		`ALTER TABLE repositories ADD COLUMN default_branch TEXT`,
+	}
+	for _, m := range migrations {
+		p.db.Exec(m) // ignore errors — column may already exist
+	}
+	return nil
 }
 
 // loadReposFromDB 从数据库加载所有仓库信息到内存缓存
@@ -118,7 +155,7 @@ func (p *Provider) loadReposFromDB() error {
 	p.mu.Lock() // Acquire write lock to modify cache
 	defer p.mu.Unlock()
 
-	rows, err := p.db.Query("SELECT id, repo_id, name, source_path, data_path, created_at, updated_at FROM repositories ORDER BY name")
+	rows, err := p.db.Query("SELECT id, repo_id, name, source_path, data_path, created_at, updated_at, COALESCE(remote_url, ''), COALESCE(default_branch, ''), COALESCE(index_status, 'none'), last_indexed_at FROM repositories ORDER BY name")
 	if err != nil {
 		return fmt.Errorf("查询数据库仓库失败: %w", err)
 	}
@@ -132,7 +169,8 @@ func (p *Provider) loadReposFromDB() error {
 		var repo Repository
 		var createdAt sql.NullTime
 		var updatedAt sql.NullTime
-		err := rows.Scan(&repo.DBID, &repo.RepoID, &repo.Name, &repo.SourcePath, &repo.DataPath, &createdAt, &updatedAt)
+		var lastIndexedAt sql.NullTime
+		err := rows.Scan(&repo.DBID, &repo.RepoID, &repo.Name, &repo.SourcePath, &repo.DataPath, &createdAt, &updatedAt, &repo.RemoteURL, &repo.DefaultBranch, &repo.IndexStatus, &lastIndexedAt)
 		if err != nil {
 			// Log individual scan errors but continue if possible
 			log.Printf("警告: 扫描数据库行失败: %v", err)
@@ -144,6 +182,9 @@ func (p *Provider) loadReposFromDB() error {
 		}
 		if updatedAt.Valid {
 			repo.UpdatedAt = updatedAt.Time
+		}
+		if lastIndexedAt.Valid {
+			repo.LastIndexedAt = &lastIndexedAt.Time
 		}
 
 		p.repositories = append(p.repositories, repo)
@@ -340,6 +381,33 @@ func (p *Provider) IndexRepositoryZoekt(id uint32) error {
 
 	log.Printf("成功为仓库 '%s' (%d) 生成 Zoekt 索引 (名称: %s)，耗时: %v", repoInfo.Name, id, zoektName, time.Since(startTime))
 	return nil
+}
+
+// RunIndexJobAsync 异步执行索引任务
+func (p *Provider) RunIndexJobAsync(repoID uint32, jobType, triggerType string) (uint32, error) {
+	if _, ok := p.GetRepo(repoID); !ok {
+		return 0, fmt.Errorf("仓库 ID '%d' 未找到", repoID)
+	}
+	jobID, err := p.CreateIndexJob(repoID, jobType, triggerType)
+	if err != nil {
+		return 0, err
+	}
+	go func() {
+		_ = p.UpdateJobStatus(jobID, JobStatusRunning, "")
+		var indexErr error
+		switch jobType {
+		case "zoekt":
+			indexErr = p.IndexRepositoryZoekt(repoID)
+		default:
+			indexErr = fmt.Errorf("未知的索引类型: %s", jobType)
+		}
+		if indexErr != nil {
+			_ = p.UpdateJobStatus(jobID, JobStatusFailed, indexErr.Error())
+		} else {
+			_ = p.UpdateJobStatus(jobID, JobStatusCompleted, "")
+		}
+	}()
+	return jobID, nil
 }
 
 // RegisterScipIndex 注册 SCIP 索引文件 (复制到仓库数据目录)

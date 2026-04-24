@@ -93,6 +93,8 @@ func main() {
 	mux.HandleFunc("POST /api/repositories", repoHandlers.AuthMiddleware(repoHandlers.HandleAdd))
 	mux.HandleFunc("DELETE /api/repositories/{id}", repoHandlers.AuthMiddleware(repoHandlers.HandleDelete))
 	mux.HandleFunc("POST /api/repositories/{id}/index", repoHandlers.AuthMiddleware(repoHandlers.HandleIndex))
+	mux.HandleFunc("GET /api/admin/repositories/{id}/index-status", repoHandlers.AuthMiddleware(repoHandlers.HandleIndexStatus))
+	mux.HandleFunc("GET /api/admin/index-jobs", repoHandlers.AuthMiddleware(repoHandlers.HandleListIndexJobs))
 	mux.HandleFunc("POST /api/repositories/{id}/scip", repoHandlers.AuthMiddleware(repoHandlers.HandleRegisterScip))
 	mux.HandleFunc("POST /api/repositories/{id}/zoekt-file", repoHandlers.AuthMiddleware(repoHandlers.HandleRegisterZoekt))
 
