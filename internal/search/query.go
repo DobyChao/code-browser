@@ -76,10 +76,26 @@ func BuildZoektQuery(repos []repo.Repository, req SearchRequest) (zoektquery.Q, 
 
 func BuildZoektFileQuery(repos []repo.Repository, req FileSearchRequest) (zoektquery.Q, error) {
 	req = NormalizeFileSearchRequest(req)
-	return BuildZoektQuery(repos, SearchRequest{
-		Query:    "file:" + req.Query,
-		Branch:   req.Branch,
-		Page:     req.Page,
-		PageSize: req.PageSize,
-	})
+	if req.Query == "" {
+		return nil, fmt.Errorf("query is required")
+	}
+	if len(repos) == 0 {
+		return nil, fmt.Errorf("at least one repository is required")
+	}
+
+	repoIDs := make([]uint32, 0, len(repos))
+	for _, r := range repos {
+		repoIDs = append(repoIDs, r.RepoID)
+	}
+
+	filters := []zoektquery.Q{
+		&zoektquery.Substring{Pattern: req.Query, FileName: true},
+	}
+	if req.Branch != "" {
+		filters = append(filters, zoektquery.NewSingleBranchesRepos(req.Branch, repoIDs...))
+	} else {
+		filters = append(filters, zoektquery.NewRepoIDs(repoIDs...))
+	}
+
+	return zoektquery.NewAnd(filters...), nil
 }

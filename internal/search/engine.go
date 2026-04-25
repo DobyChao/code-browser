@@ -17,21 +17,6 @@ import (
 	"code-browser/internal/repo"
 )
 
-// SearchFragment 定义了行内的一个匹配片段
-type SearchFragment struct {
-	Offset int `json:"offset"`
-	Length int `json:"length"`
-}
-
-// SearchResult 定义了返回给前端的单条搜索结果的结构 (已更新)
-type SearchResult struct {
-	RepoName  string           `json:"repo_name,omitempty"`
-	Path      string           `json:"path"`
-	LineNum   int              `json:"lineNum"`
-	LineText  string           `json:"lineText"`  // 完整的、base64 解码后的行文本
-	Fragments []SearchFragment `json:"fragments"` // 行内的匹配片段列表
-}
-
 // Engine 定义了所有搜索引擎都必须实现的接口 (保持不变)
 type Engine interface {
 	SearchContent(repo repo.Repository, query string) ([]SearchResult, error)
@@ -196,6 +181,7 @@ func (z *ZoektEngine) SearchContent(repo repo.Repository, query string) ([]Searc
 
 			// 3. 填充新的 SearchResult 结构
 			results = append(results, SearchResult{
+				RepoName:  fileMatch.Repo,
 				Path:      fileMatch.FileName,
 				LineNum:   match.LineNumber,
 				LineText:  lineText,

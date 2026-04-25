@@ -6,6 +6,21 @@ import (
 	"code-browser/internal/repo"
 )
 
+// SearchFragment identifies one highlighted match inside a result line.
+type SearchFragment struct {
+	Offset int `json:"offset"`
+	Length int `json:"length"`
+}
+
+// SearchResult is the public search result shape returned by HTTP APIs.
+type SearchResult struct {
+	RepoName  string           `json:"repo_name,omitempty"`
+	Path      string           `json:"path"`
+	LineNum   int              `json:"lineNum"`
+	LineText  string           `json:"lineText"`
+	Fragments []SearchFragment `json:"fragments"`
+}
+
 type SearchRequest struct {
 	Query    string
 	Branch   string
