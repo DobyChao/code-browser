@@ -1,6 +1,8 @@
 package repo
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -216,6 +218,79 @@ func TestListIndexJobs(t *testing.T) {
 		t.Errorf("limit 结果排序不正确: [%d, %d], 期望 [%d, %d]",
 			limited[0].ID, limited[1].ID, id3, id2)
 	}
+}
+
+type fakeIndexRunner struct {
+	err    error
+	called chan Repository
+}
+
+func (f *fakeIndexRunner) IndexRepository(ctx context.Context, repository Repository) error {
+	f.called <- repository
+	return f.err
+}
+
+func TestRunIndexJobAsyncUsesInjectedRunner(t *testing.T) {
+	p := setupTestProvider(t)
+	addTestRepo(t, p, 1, "test-repo")
+	runner := &fakeIndexRunner{called: make(chan Repository, 1)}
+	p.SetIndexRunner(runner)
+
+	jobID, err := p.RunIndexJobAsync(1, "zoekt", "manual")
+	if err != nil {
+		t.Fatalf("RunIndexJobAsync failed: %v", err)
+	}
+
+	select {
+	case got := <-runner.called:
+		if got.RepoID != 1 {
+			t.Fatalf("expected repo 1, got %d", got.RepoID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("index runner was not called")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		job, err := p.GetIndexJob(jobID)
+		if err != nil {
+			t.Fatalf("GetIndexJob failed: %v", err)
+		}
+		if job.Status == JobStatusCompleted {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("job did not complete")
+}
+
+func TestRunIndexJobAsyncRecordsRunnerFailure(t *testing.T) {
+	p := setupTestProvider(t)
+	addTestRepo(t, p, 1, "test-repo")
+	runner := &fakeIndexRunner{err: errors.New("index failed"), called: make(chan Repository, 1)}
+	p.SetIndexRunner(runner)
+
+	jobID, err := p.RunIndexJobAsync(1, "zoekt", "manual")
+	if err != nil {
+		t.Fatalf("RunIndexJobAsync failed: %v", err)
+	}
+	<-runner.called
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		job, err := p.GetIndexJob(jobID)
+		if err != nil {
+			t.Fatalf("GetIndexJob failed: %v", err)
+		}
+		if job.Status == JobStatusFailed {
+			if job.Error != "index failed" {
+				t.Fatalf("expected error to be recorded, got %q", job.Error)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("job did not fail")
 }
 
 func TestGetIndexJob_NotFound(t *testing.T) {

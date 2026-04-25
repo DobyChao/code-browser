@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"net/http"
@@ -55,8 +56,11 @@ func main() {
 
 	coreService := core.NewService(repoProvider, appCache)
 
+	zoektIndexDir := filepath.Join(*dataDir, "zoekt-index")
 	zoektService, err := search.NewZoektService(search.IndexOptions{
-		IndexDir: filepath.Join(*dataDir, "zoekt-index"),
+		IndexDir:    zoektIndexDir,
+		Branches:    []string{"HEAD"},
+		Incremental: true,
 	})
 	if err != nil {
 		log.Fatalf("错误: 无法初始化 Zoekt 服务: %v", err)
@@ -66,6 +70,13 @@ func main() {
 			log.Printf("关闭 Zoekt 服务时出错: %v", err)
 		}
 	}()
+	repoProvider.SetIndexRunner(repo.IndexRunnerFunc(func(ctx context.Context, repository repo.Repository) error {
+		return zoektService.IndexRepository(ctx, repository, search.IndexOptions{
+			IndexDir:    zoektIndexDir,
+			Branches:    []string{"HEAD"},
+			Incremental: true,
+		})
+	}))
 
 	zoektEngine := &search.ZoektEngine{ApiUrl: "http://localhost:6070"}
 
