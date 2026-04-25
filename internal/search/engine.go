@@ -25,6 +25,7 @@ type SearchFragment struct {
 
 // SearchResult 定义了返回给前端的单条搜索结果的结构 (已更新)
 type SearchResult struct {
+	RepoName  string           `json:"repo_name,omitempty"`
 	Path      string           `json:"path"`
 	LineNum   int              `json:"lineNum"`
 	LineText  string           `json:"lineText"`  // 完整的、base64 解码后的行文本
@@ -76,7 +77,7 @@ type ZoektFragment struct {
 
 // ZoektSearchOptions 定义了可以传递给 Zoekt 的搜索选项
 type ZoektSearchOptions struct {
-	ShardMaxMatchCount int `json:"ShardMaxMatchCount,omitempty"`
+	ShardMaxMatchCount   int `json:"ShardMaxMatchCount,omitempty"`
 	MaxMatchDisplayCount int `json:"MaxMatchDisplayCount,omitempty"`
 }
 
@@ -256,9 +257,13 @@ func (rg *RipgrepEngine) SearchContent(repo repo.Repository, query string) ([]Se
 		var rgResult struct {
 			Type string `json:"type"`
 			Data struct {
-				Path       struct{ Text string `json:"text"` } `json:"path"`
-				LineNumber uint64                              `json:"line_number"`
-				Lines      struct{ Text string `json:"text"` } `json:"lines"`
+				Path struct {
+					Text string `json:"text"`
+				} `json:"path"`
+				LineNumber uint64 `json:"line_number"`
+				Lines      struct {
+					Text string `json:"text"`
+				} `json:"lines"`
 				// ★★★ 核心改动: 捕获 Submatches ★★★
 				Submatches []struct {
 					Start int `json:"start"`
@@ -274,7 +279,7 @@ func (rg *RipgrepEngine) SearchContent(repo repo.Repository, query string) ([]Se
 			// ★★★ 核心改动: 转换 Submatches ★★★
 			var apiFragments []SearchFragment
 			lineText := strings.TrimSpace(rgResult.Data.Lines.Text)
-			
+
 			for _, submatch := range rgResult.Data.Submatches {
 				// rg 的 offset 是基于原始行（包含换行符）的，
 				// 而我们 TrimSpace 了。为简单起见，我们假设匹配不在前导/后导空格中。
