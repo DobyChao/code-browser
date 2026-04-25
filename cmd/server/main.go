@@ -78,8 +78,6 @@ func main() {
 		})
 	}))
 
-	zoektEngine := &search.ZoektEngine{ApiUrl: "http://localhost:6070"}
-
 	// 3. 创建并配置搜索服务
 	searchHandlers := &search.Handlers{
 		RepoProvider: repoProvider,
@@ -93,7 +91,7 @@ func main() {
 		Service:      coreService,
 	}
 
-	analysisService := analysis.NewService(repoProvider, zoektEngine, coreService)
+	analysisService := analysis.NewService(repoProvider, zoektService, coreService)
 	analysisHandlers := &analysis.Handlers{Service: analysisService}
 
 	// 5.1 创建仓库管理 Handler
