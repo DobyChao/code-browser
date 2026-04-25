@@ -64,6 +64,7 @@ func TestConvertSearchResultNormalizesPagination(t *testing.T) {
 
 func TestConvertSearchResultAppliesPagination(t *testing.T) {
 	src := &zoekt.SearchResult{
+		Stats: zoekt.Stats{MatchCount: 10},
 		Files: []zoekt.FileMatch{{
 			FileName: "a.go",
 			LineMatches: []zoekt.LineMatch{
@@ -75,8 +76,8 @@ func TestConvertSearchResultAppliesPagination(t *testing.T) {
 	}
 
 	got := ConvertSearchResult(src, SearchRequest{Page: 2, PageSize: 1})
-	if got.Total != 3 {
-		t.Fatalf("expected total 3, got %d", got.Total)
+	if got.Total != 10 {
+		t.Fatalf("expected stats total 10, got %d", got.Total)
 	}
 	if len(got.Results) != 1 {
 		t.Fatalf("expected one paged result, got %d", len(got.Results))
@@ -126,6 +127,7 @@ func TestConvertFileSearchResultHandlesEmptyAndPagination(t *testing.T) {
 
 func TestConvertFileSearchResultAppliesPagination(t *testing.T) {
 	src := &zoekt.SearchResult{
+		Stats: zoekt.Stats{FileCount: 10},
 		Files: []zoekt.FileMatch{
 			{FileName: "a.go"},
 			{FileName: "b.go"},
@@ -133,8 +135,8 @@ func TestConvertFileSearchResultAppliesPagination(t *testing.T) {
 		},
 	}
 	got := ConvertFileSearchResult(src, FileSearchRequest{Page: 2, PageSize: 1})
-	if got.Total != 3 {
-		t.Fatalf("expected total 3, got %d", got.Total)
+	if got.Total != 10 {
+		t.Fatalf("expected stats total 10, got %d", got.Total)
 	}
 	if len(got.Files) != 1 || got.Files[0] != "b.go" {
 		t.Fatalf("expected second file on page 2, got %+v", got.Files)
