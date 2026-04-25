@@ -5,6 +5,7 @@ import "github.com/sourcegraph/zoekt"
 func ConvertSearchResult(src *zoekt.SearchResult, req SearchRequest) *SearchResponse {
 	req = NormalizeSearchRequest(req)
 	resp := &SearchResponse{
+		Results:  []SearchResult{},
 		Page:     req.Page,
 		PageSize: req.PageSize,
 	}
@@ -31,12 +32,14 @@ func ConvertSearchResult(src *zoekt.SearchResult, req SearchRequest) *SearchResp
 		}
 	}
 	resp.Total = len(resp.Results)
+	resp.Results = pageSlice(resp.Results, req.Page, req.PageSize)
 	return resp
 }
 
 func ConvertFileSearchResult(src *zoekt.SearchResult, req FileSearchRequest) *FileSearchResponse {
 	req = NormalizeFileSearchRequest(req)
 	resp := &FileSearchResponse{
+		Files:    []string{},
 		Page:     req.Page,
 		PageSize: req.PageSize,
 	}
@@ -53,5 +56,21 @@ func ConvertFileSearchResult(src *zoekt.SearchResult, req FileSearchRequest) *Fi
 		resp.Files = append(resp.Files, file.FileName)
 	}
 	resp.Total = len(resp.Files)
+	resp.Files = pageSlice(resp.Files, req.Page, req.PageSize)
 	return resp
+}
+
+func pageSlice[T any](items []T, page, pageSize int) []T {
+	if len(items) == 0 {
+		return []T{}
+	}
+	start := (page - 1) * pageSize
+	if start >= len(items) {
+		return []T{}
+	}
+	end := start + pageSize
+	if end > len(items) {
+		end = len(items)
+	}
+	return items[start:end]
 }

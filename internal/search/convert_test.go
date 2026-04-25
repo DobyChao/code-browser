@@ -1,6 +1,7 @@
 package search
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/sourcegraph/zoekt"
@@ -61,6 +62,41 @@ func TestConvertSearchResultNormalizesPagination(t *testing.T) {
 	}
 }
 
+func TestConvertSearchResultAppliesPagination(t *testing.T) {
+	src := &zoekt.SearchResult{
+		Files: []zoekt.FileMatch{{
+			FileName: "a.go",
+			LineMatches: []zoekt.LineMatch{
+				{Line: []byte("line 1"), LineNumber: 1},
+				{Line: []byte("line 2"), LineNumber: 2},
+				{Line: []byte("line 3"), LineNumber: 3},
+			},
+		}},
+	}
+
+	got := ConvertSearchResult(src, SearchRequest{Page: 2, PageSize: 1})
+	if got.Total != 3 {
+		t.Fatalf("expected total 3, got %d", got.Total)
+	}
+	if len(got.Results) != 1 {
+		t.Fatalf("expected one paged result, got %d", len(got.Results))
+	}
+	if got.Results[0].LineNum != 2 {
+		t.Fatalf("expected second line on page 2, got %+v", got.Results[0])
+	}
+}
+
+func TestConvertSearchResultNilUsesEmptyJSONArrays(t *testing.T) {
+	got := ConvertSearchResult(nil, SearchRequest{})
+	body, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+	if string(body) != `{"results":[],"total":0,"page":1,"page_size":50}` {
+		t.Fatalf("expected empty results array, got %s", body)
+	}
+}
+
 func TestConvertFileSearchResultReturnsUniqueFiles(t *testing.T) {
 	src := &zoekt.SearchResult{
 		Files: []zoekt.FileMatch{
@@ -85,5 +121,33 @@ func TestConvertFileSearchResultHandlesEmptyAndPagination(t *testing.T) {
 	}
 	if got.Page != 3 || got.PageSize != 25 {
 		t.Fatalf("expected pagination to be preserved, got page=%d size=%d", got.Page, got.PageSize)
+	}
+}
+
+func TestConvertFileSearchResultAppliesPagination(t *testing.T) {
+	src := &zoekt.SearchResult{
+		Files: []zoekt.FileMatch{
+			{FileName: "a.go"},
+			{FileName: "b.go"},
+			{FileName: "c.go"},
+		},
+	}
+	got := ConvertFileSearchResult(src, FileSearchRequest{Page: 2, PageSize: 1})
+	if got.Total != 3 {
+		t.Fatalf("expected total 3, got %d", got.Total)
+	}
+	if len(got.Files) != 1 || got.Files[0] != "b.go" {
+		t.Fatalf("expected second file on page 2, got %+v", got.Files)
+	}
+}
+
+func TestConvertFileSearchResultNilUsesEmptyJSONArrays(t *testing.T) {
+	got := ConvertFileSearchResult(nil, FileSearchRequest{})
+	body, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+	if string(body) != `{"files":[],"total":0,"page":1,"page_size":50}` {
+		t.Fatalf("expected empty files array, got %s", body)
 	}
 }
