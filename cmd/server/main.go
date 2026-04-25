@@ -4,6 +4,7 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"code-browser/internal/analysis"
@@ -54,11 +55,24 @@ func main() {
 
 	coreService := core.NewService(repoProvider, appCache)
 
+	zoektService, err := search.NewZoektService(search.IndexOptions{
+		IndexDir: filepath.Join(*dataDir, "zoekt-index"),
+	})
+	if err != nil {
+		log.Fatalf("错误: 无法初始化 Zoekt 服务: %v", err)
+	}
+	defer func() {
+		if err := zoektService.Close(); err != nil {
+			log.Printf("关闭 Zoekt 服务时出错: %v", err)
+		}
+	}()
+
 	zoektEngine := &search.ZoektEngine{ApiUrl: "http://localhost:6070"}
 
 	// 3. 创建并配置搜索服务
 	searchHandlers := &search.Handlers{
 		RepoProvider: repoProvider,
+		Service:      zoektService,
 		Cache:        appCache,
 	}
 

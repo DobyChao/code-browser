@@ -70,7 +70,7 @@ func (h *Handlers) SearchContent(w http.ResponseWriter, r *http.Request) {
 	results, err := h.Service.SearchContent(r.Context(), []repo.Repository{repoInfo}, req)
 	if err != nil {
 		log.Printf("内容搜索失败 (engine: zoekt, repo: %d): %v", repoID, err)
-		http.Error(w, fmt.Sprintf("Search failed: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Search failed: %v", err), searchErrorStatus(err))
 		return
 	}
 
@@ -118,7 +118,7 @@ func (h *Handlers) SearchFiles(w http.ResponseWriter, r *http.Request) {
 	results, err := h.Service.SearchFiles(r.Context(), []repo.Repository{repoInfo}, req)
 	if err != nil {
 		log.Printf("文件名搜索失败 (engine: zoekt, repo: %d): %v", repoID, err)
-		http.Error(w, fmt.Sprintf("File search failed: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("File search failed: %v", err), searchErrorStatus(err))
 		return
 	}
 
@@ -177,11 +177,46 @@ func parsePositiveInt(raw string) int {
 }
 
 func contentCacheKey(repoID uint32, req SearchRequest) string {
-	return fmt.Sprintf("search:content:zoekt:%d:%s:%s:%s:%d:%d", repoID, req.Query, req.Branch, req.File, req.Page, req.PageSize)
+	key, err := json.Marshal(struct {
+		Kind   string        `json:"kind"`
+		Engine string        `json:"engine"`
+		RepoID uint32        `json:"repo_id"`
+		Req    SearchRequest `json:"req"`
+	}{
+		Kind:   "content",
+		Engine: "zoekt",
+		RepoID: repoID,
+		Req:    req,
+	})
+	if err != nil {
+		return fmt.Sprintf("search:content:zoekt:%d", repoID)
+	}
+	return string(key)
 }
 
 func filesCacheKey(repoID uint32, req FileSearchRequest) string {
-	return fmt.Sprintf("search:files:zoekt:%d:%s:%s:%d:%d", repoID, req.Query, req.Branch, req.Page, req.PageSize)
+	key, err := json.Marshal(struct {
+		Kind   string            `json:"kind"`
+		Engine string            `json:"engine"`
+		RepoID uint32            `json:"repo_id"`
+		Req    FileSearchRequest `json:"req"`
+	}{
+		Kind:   "files",
+		Engine: "zoekt",
+		RepoID: repoID,
+		Req:    req,
+	})
+	if err != nil {
+		return fmt.Sprintf("search:files:zoekt:%d", repoID)
+	}
+	return string(key)
+}
+
+func searchErrorStatus(err error) int {
+	if IsInvalidRequestError(err) {
+		return http.StatusBadRequest
+	}
+	return http.StatusInternalServerError
 }
 
 func writeJSON(w http.ResponseWriter, data any) {

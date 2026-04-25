@@ -237,6 +237,35 @@ func TestSearchContentReturnsServiceErrors(t *testing.T) {
 	}
 }
 
+func TestSearchContentReturnsBadRequestForInvalidSearchRequest(t *testing.T) {
+	handlers := &Handlers{
+		Service:      &recordingSearchService{contentErr: InvalidRequestError{Err: errors.New("invalid query")}},
+		RepoProvider: newTestRepoProvider(t),
+		Cache:        cache.New(time.Minute, time.Minute),
+	}
+
+	w := httptest.NewRecorder()
+	handlers.SearchContent(w, searchRequest("/api/repositories/7/search?q=needle", "7"))
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestSearchCacheKeysDoNotCollideOnDelimitedInput(t *testing.T) {
+	contentA := contentCacheKey(7, SearchRequest{Query: "a:b", Branch: "c", File: "d", Page: 1, PageSize: 50})
+	contentB := contentCacheKey(7, SearchRequest{Query: "a", Branch: "b:c", File: "d", Page: 1, PageSize: 50})
+	if contentA == contentB {
+		t.Fatalf("content cache keys collided: %s", contentA)
+	}
+
+	filesA := filesCacheKey(7, FileSearchRequest{Query: "a:b", Branch: "c", Page: 1, PageSize: 50})
+	filesB := filesCacheKey(7, FileSearchRequest{Query: "a", Branch: "b:c", Page: 1, PageSize: 50})
+	if filesA == filesB {
+		t.Fatalf("file cache keys collided: %s", filesA)
+	}
+}
+
 func searchRequest(target string, repoID string) *http.Request {
 	req := httptest.NewRequest(http.MethodGet, target, nil)
 	req.SetPathValue("id", repoID)
