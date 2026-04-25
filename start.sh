@@ -13,10 +13,4 @@ REPO_PID=$!
 echo $REPO_PID > "$LOG_DIR/repo-server.pid"
 echo "   PID: $REPO_PID"
 
-echo "🔍 启动 zoekt-webserver..."
-nohup zoekt-webserver -index ./.data/zoekt-index/ -rpc > "$LOG_DIR/zoekt.log" 2>&1 &
-ZOECT_PID=$!
-echo $ZOECT_PID > "$LOG_DIR/zoekt.pid"
-echo "   PID: $ZOECT_PID"
-
 echo "✅ 启动完成！日志: $LOG_DIR"

@@ -449,7 +449,7 @@ func (p *Provider) RegisterZoektIndex(id uint32, zoektPaths []string) error {
 		} else {
 			// 如果不符合标准分片格式，默认使用 .00000.zoekt (但这可能会导致多文件冲突，如果用户上传了多个不带分片号的文件)
 			// 为了支持用户手动指定的不带分片号的文件，我们可以简单地按顺序分配
-			// 但这里假设用户上传的是 zoekt-git-index 生成的标准文件
+			// 但这里假设用户上传的是标准 Zoekt 分片文件
 			return fmt.Errorf("文件名 '%s' 不符合 Zoekt 分片格式 (例如 .00000.zoekt)", baseName)
 		}
 

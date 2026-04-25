@@ -6,7 +6,7 @@ A lightweight code browsing service with a CLI to manage repositories and an HTT
 
 ```bash
 ./build.sh
-./start.sh    # starts repo-server and zoekt-webserver
+./start.sh    # starts repo-server with embedded Zoekt
 # Add a repository
 ./repo-cli -command add -id 1 -name "my-repo" -path "/abs/path/to/my-repo" -data-dir .data
 # Trigger Zoekt index
@@ -45,7 +45,7 @@ A lightweight code browsing service with a CLI to manage repositories and an HTT
   ```
 
   Notes:
-  - Requires `zoekt-git-index` and `zoekt-webserver` in `PATH`.
+  - Zoekt indexing is embedded in `repo-cli`; no external `zoekt-git-index` or `zoekt-webserver` process is required.
   - Ensure repo path is a valid Git repository before indexing.
 
   Register SCIP index:
@@ -55,7 +55,7 @@ A lightweight code browsing service with a CLI to manage repositories and an HTT
   ```
   Copies the provided `.scip` file into `<data-dir>/repos/<id>/scip/index.scip` without modification.
 
-- `./repo-server` — starts the HTTP service that serves repository information and search results. See `cmd/server/main.go` for flags and configuration options. Note: at present you must start the Zoekt webserver manually (see below).
+- `./repo-server` — starts the HTTP service that serves repository information and search results. Zoekt search and indexing run in-process.
 
   Example:
 
@@ -65,12 +65,7 @@ A lightweight code browsing service with a CLI to manage repositories and an HTT
 
 **Dependencies**
 - Go >= 1.25.1
-- Zoekt tools:
-  ```bash
-  go install github.com/sourcegraph/zoekt/cmd/zoekt-git-index@latest
-  go install github.com/sourcegraph/zoekt/cmd/zoekt-webserver@latest
-  export PATH="$PATH:$HOME/go/bin"
-  ```
+- No external Zoekt or ripgrep binaries are required at runtime.
 
 **Start/Stop**
 
@@ -86,7 +81,7 @@ A lightweight code browsing service with a CLI to manage repositories and an HTT
 ./stop.sh
 ```
 
-Note: `start.sh` automatically starts `zoekt-webserver`.
+Note: `start.sh` only starts `repo-server`; Zoekt is embedded.
 
 **Detailed Docs**
 

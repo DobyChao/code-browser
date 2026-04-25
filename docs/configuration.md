@@ -8,14 +8,7 @@
   - `zoekt-index/` — global Zoekt index directory
 
 ## Environment & Binaries
-- Required binaries in `PATH`:
-  - `zoekt-git-index`
-  - `zoekt-webserver`
-  - `rg` (ripgrep)
-- Recommended PATH setup:
-  ```bash
-  export PATH="$PATH:$HOME/go/bin"
-  ```
+- Required binaries in `PATH`: none for search/indexing. Zoekt is embedded in `repo-server` and `repo-cli`.
 
 ## Server Options
 - Run server: `./repo-server -data-dir .data`
@@ -41,4 +34,4 @@
 
 ## Notes
 - Ensure target repo path is a valid Git repository before indexing.
-- Make sure Zoekt webserver is running and accessible at `http://localhost:6070`.
+- Zoekt shards are stored under `<data-dir>/zoekt-index/`.

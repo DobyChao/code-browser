@@ -5,14 +5,14 @@
 - `cmd/cli`: repository management CLI
 - `internal/repo`: SQLite-backed repository provider, Zoekt indexing
 - `internal/core`: file tree and blob service
-- `internal/search`: Zoekt and Ripgrep engines + handlers
+- `internal/search`: embedded Zoekt query, search, result conversion, and indexing
 - `internal/analysis`: SCIP-based definition + fallback search
 - `web/`: frontend (vanilla HTML/JS)
 
 ## Build & Run
 ```bash
 ./build.sh
-./start.sh   # starts repo-server and zoekt-webserver
+./start.sh   # starts repo-server with embedded Zoekt
 ./stop.sh    # stops processes
 ```
 

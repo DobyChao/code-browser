@@ -35,25 +35,39 @@
 - Response: text (default `text/plain; charset=utf-8`).
 
 ## Search
-### GET `/api/repositories/{id}/search?q=<query>&engine=<zoekt|ripgrep>`
+### GET `/api/repositories/{id}/search?q=<query>`
 - Description: Content search, returning match positions and line fragments.
-- Query params: `q` (required), `engine` (required: `zoekt` or `ripgrep`).
+- Query params: `q` (required), `branch`, `file`, `page`, and `page_size` are optional. `engine` is deprecated; `engine=ripgrep` returns `400 Bad Request`.
 - Response:
   ```json
-  [
-    {
-      "path": "string",
-      "lineNum": 123,
-      "lineText": "string",
-      "fragments": [{ "offset": 0, "length": 5 }]
-    }
-  ]
+  {
+    "results": [
+      {
+        "repo_name": "string",
+        "path": "string",
+        "lineNum": 123,
+        "lineText": "string",
+        "fragments": [{ "offset": 0, "length": 5 }]
+      }
+    ],
+    "total": 1,
+    "page": 1,
+    "page_size": 50
+  }
   ```
 
-### GET `/api/repositories/{id}/search-files?q=<query>&engine=<zoekt|ripgrep>`
+### GET `/api/repositories/{id}/search-files?q=<query>`
 - Description: File name search, returning matched file paths.
-- Query params: `q` (optional; empty typically yields empty results), `engine` (optional, default `zoekt`).
-- Response: `[ "path/to/file" ]`
+- Query params: `q` (required), `branch`, `page`, and `page_size` are optional. `engine=ripgrep` returns `400 Bad Request`.
+- Response:
+  ```json
+  {
+    "files": ["path/to/file"],
+    "total": 1,
+    "page": 1,
+    "page_size": 50
+  }
+  ```
 
 ## Intelligence (Definitions & References)
 ### POST `/api/intelligence/definitions`
@@ -128,7 +142,7 @@ Notes:
 - List repositories: `GET /api/repositories`
 - Root tree: `GET /api/repositories/1/tree?path=`
 - File content: `GET /api/repositories/1/blob?path=cmd/server/main.go`
-- Content search (Zoekt): `GET /api/repositories/1/search?q=sym:Provider&engine=zoekt`
-- File search (Ripgrep): `GET /api/repositories/1/search-files?q=main.go&engine=ripgrep`
+- Content search: `GET /api/repositories/1/search?q=sym:Provider`
+- File search: `GET /api/repositories/1/search-files?q=main.go`
 - Jump to definition: `POST /api/intelligence/definitions` with `{"repoId":"1","filePath":"internal/repo/provider.go","line":182,"character":10}`
 - Find references: `POST /api/intelligence/references` with the same body
