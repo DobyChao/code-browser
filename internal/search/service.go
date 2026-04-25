@@ -84,10 +84,6 @@ func (s *ZoektService) SearchFiles(ctx context.Context, repos []repo.Repository,
 	return ConvertFileSearchResult(result, req), nil
 }
 
-func (s *ZoektService) IndexRepository(context.Context, repo.Repository, IndexOptions) error {
-	return fmt.Errorf("zoekt indexing is not implemented")
-}
-
 func (s *ZoektService) Health(ctx context.Context) error {
 	if s.searcher == nil {
 		return fmt.Errorf("zoekt searcher is not initialized")

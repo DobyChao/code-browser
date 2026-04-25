@@ -116,6 +116,7 @@ require (
 	github.com/fsnotify/fsnotify v1.8.0 // indirect
 	github.com/go-enry/go-enry/v2 v2.9.1 // indirect
 	github.com/go-enry/go-oniguruma v1.2.1 // indirect
+	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/grafana/regexp v0.0.0-20240607082908-2cb410fa05da // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
