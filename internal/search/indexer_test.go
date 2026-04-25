@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"code-browser/internal/repo"
+
+	zoektsearch "github.com/sourcegraph/zoekt/search"
 )
 
 func TestZoektServiceIndexRepositoryCreatesShard(t *testing.T) {
@@ -50,6 +52,24 @@ func TestZoektServiceIndexRepositoryCreatesShard(t *testing.T) {
 			names = append(names, entry.Name())
 		}
 		t.Fatalf("expected at least one .zoekt shard in %s, found %v", indexDir, names)
+	}
+
+	searcher, err := zoektsearch.NewDirectorySearcher(indexDir)
+	if err != nil {
+		t.Fatalf("open zoekt searcher: %v", err)
+	}
+	defer searcher.Close()
+
+	query, err := BuildZoektQuery([]repo.Repository{{RepoID: 42}}, SearchRequest{Query: "Message", Branch: "main"})
+	if err != nil {
+		t.Fatalf("BuildZoektQuery failed: %v", err)
+	}
+	result, err := searcher.Search(context.Background(), query, searchOptionsForPage(1, 10))
+	if err != nil {
+		t.Fatalf("search indexed shard: %v", err)
+	}
+	if len(result.Files) == 0 {
+		t.Fatalf("expected indexed shard to match by repo id and branch")
 	}
 }
 
