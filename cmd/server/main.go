@@ -55,16 +55,11 @@ func main() {
 	coreService := core.NewService(repoProvider, appCache)
 
 	zoektEngine := &search.ZoektEngine{ApiUrl: "http://localhost:6070"}
-	ripgrepEngine := &search.RipgrepEngine{}
 
 	// 3. 创建并配置搜索服务
 	searchHandlers := &search.Handlers{
 		RepoProvider: repoProvider,
-		Engines: map[string]search.Engine{
-			"zoekt":   zoektEngine,
-			"ripgrep": ripgrepEngine,
-		},
-		Cache: appCache,
+		Cache:        appCache,
 	}
 
 	// 4. 创建核心服务

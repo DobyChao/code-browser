@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strconv" // Needed for parsing uint32 repoID
+	"strconv"
 
 	"code-browser/internal/repo"
 	"github.com/patrickmn/go-cache"
@@ -13,10 +13,12 @@ import (
 
 // Handlers 封装了所有与搜索相关的 HTTP 处理器
 type Handlers struct {
-	Engines      map[string]Engine // 搜索引擎实例映射
-	RepoProvider *repo.Provider    // 仓库服务实例，用于获取仓库信息
-	Cache        *cache.Cache      // 缓存实例
+	Service      Service        // 搜索服务实例
+	RepoProvider *repo.Provider // 仓库服务实例，用于获取仓库信息
+	Cache        *cache.Cache   // 缓存实例
 }
+
+const ripgrepRemovedMessage = "engine=ripgrep has been removed; only engine=zoekt is supported"
 
 // parseRepoIDHelper 从请求路径中解析 uint32 仓库 ID (辅助函数)
 func parseRepoIDHelper(r *http.Request) (uint32, error) {
@@ -35,26 +37,20 @@ func (h *Handlers) SearchContent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	query := r.URL.Query().Get("q")
 	engineName := r.URL.Query().Get("engine")
-
-	if query == "" {
-		http.Error(w, "Query parameter 'q' is required", http.StatusBadRequest)
+	if err := validateSearchEngine(engineName); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	// 为 SearchContent 添加缓存
-	cacheKey := fmt.Sprintf("search:content:%s:%d:%s", engineName, repoID, query)
-	if data, found := h.Cache.Get(cacheKey); found {
-		log.Printf("DEBUG: 缓存命中 (search-content): %s", cacheKey)
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(data)
+	req, err := parseSearchRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	engine, ok := h.Engines[engineName]
-	if !ok {
-		http.Error(w, fmt.Sprintf("Invalid search engine: %s. Available: %v", engineName, getMapKeys(h.Engines)), http.StatusBadRequest)
+	if h.Service == nil {
+		http.Error(w, "Search service is not configured", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -64,20 +60,22 @@ func (h *Handlers) SearchContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results, err := engine.SearchContent(repoInfo, query)
+	cacheKey := contentCacheKey(repoID, req)
+	if data, found := h.Cache.Get(cacheKey); found {
+		log.Printf("DEBUG: 缓存命中 (search-content): %s", cacheKey)
+		writeJSON(w, data)
+		return
+	}
+
+	results, err := h.Service.SearchContent(r.Context(), []repo.Repository{repoInfo}, req)
 	if err != nil {
-		log.Printf("内容搜索失败 (engine: %s, repo: %d): %v", engineName, repoID, err)
+		log.Printf("内容搜索失败 (engine: zoekt, repo: %d): %v", repoID, err)
 		http.Error(w, fmt.Sprintf("Search failed: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	// 缓存结果
 	h.Cache.Set(cacheKey, results, cache.DefaultExpiration)
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(results); err != nil {
-		log.Printf("序列化搜索结果失败: %v", err)
-	}
+	writeJSON(w, results)
 }
 
 // SearchFiles 处理文件名搜索请求
@@ -87,25 +85,20 @@ func (h *Handlers) SearchFiles(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	query := r.URL.Query().Get("q")
 	engineName := r.URL.Query().Get("engine")
-
-	if engineName == "" {
-		engineName = "zoekt" // Default to zoekt if no engine specified
-	}
-
-	// 为 SearchFiles 添加缓存
-	cacheKey := fmt.Sprintf("search:files:%s:%d:%s", engineName, repoID, query)
-	if data, found := h.Cache.Get(cacheKey); found {
-		log.Printf("DEBUG: 缓存命中 (search-files): %s", cacheKey)
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(data)
+	if err := validateSearchEngine(engineName); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	engine, ok := h.Engines[engineName]
-	if !ok {
-		http.Error(w, fmt.Sprintf("Invalid search engine: %s. Available: %v", engineName, getMapKeys(h.Engines)), http.StatusBadRequest)
+	req, err := parseFileSearchRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if h.Service == nil {
+		http.Error(w, "Search service is not configured", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -115,28 +108,85 @@ func (h *Handlers) SearchFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results, err := engine.SearchFiles(repoInfo, query)
+	cacheKey := filesCacheKey(repoID, req)
+	if data, found := h.Cache.Get(cacheKey); found {
+		log.Printf("DEBUG: 缓存命中 (search-files): %s", cacheKey)
+		writeJSON(w, data)
+		return
+	}
+
+	results, err := h.Service.SearchFiles(r.Context(), []repo.Repository{repoInfo}, req)
 	if err != nil {
-		log.Printf("文件名搜索失败 (engine: %s, repo: %d): %v", engineName, repoID, err)
+		log.Printf("文件名搜索失败 (engine: zoekt, repo: %d): %v", repoID, err)
 		http.Error(w, fmt.Sprintf("File search failed: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	// 缓存结果
 	h.Cache.Set(cacheKey, results, cache.DefaultExpiration)
+	writeJSON(w, results)
+}
 
+func validateSearchEngine(engineName string) error {
+	switch engineName {
+	case "", "zoekt":
+		return nil
+	case "ripgrep":
+		return fmt.Errorf(ripgrepRemovedMessage)
+	default:
+		return fmt.Errorf("invalid search engine: %s; only engine=zoekt is supported", engineName)
+	}
+}
+
+func parseSearchRequest(r *http.Request) (SearchRequest, error) {
+	query := r.URL.Query()
+	req := SearchRequest{
+		Query:    query.Get("q"),
+		Branch:   query.Get("branch"),
+		File:     query.Get("file"),
+		Page:     parsePositiveInt(query.Get("page")),
+		PageSize: parsePositiveInt(query.Get("page_size")),
+	}
+	req = NormalizeSearchRequest(req)
+	if req.Query == "" {
+		return SearchRequest{}, fmt.Errorf("Query parameter 'q' is required")
+	}
+	return req, nil
+}
+
+func parseFileSearchRequest(r *http.Request) (FileSearchRequest, error) {
+	query := r.URL.Query()
+	req := FileSearchRequest{
+		Query:    query.Get("q"),
+		Branch:   query.Get("branch"),
+		Page:     parsePositiveInt(query.Get("page")),
+		PageSize: parsePositiveInt(query.Get("page_size")),
+	}
+	req = NormalizeFileSearchRequest(req)
+	if req.Query == "" {
+		return FileSearchRequest{}, fmt.Errorf("Query parameter 'q' is required")
+	}
+	return req, nil
+}
+
+func parsePositiveInt(raw string) int {
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0
+	}
+	return value
+}
+
+func contentCacheKey(repoID uint32, req SearchRequest) string {
+	return fmt.Sprintf("search:content:zoekt:%d:%s:%s:%s:%d:%d", repoID, req.Query, req.Branch, req.File, req.Page, req.PageSize)
+}
+
+func filesCacheKey(repoID uint32, req FileSearchRequest) string {
+	return fmt.Sprintf("search:files:zoekt:%d:%s:%s:%d:%d", repoID, req.Query, req.Branch, req.Page, req.PageSize)
+}
+
+func writeJSON(w http.ResponseWriter, data any) {
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(results); err != nil {
-		log.Printf("序列化文件结果失败: %v", err)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		log.Printf("序列化搜索结果失败: %v", err)
 	}
 }
-
-// getMapKeys 辅助函数，获取 map 的键
-func getMapKeys(m map[string]Engine) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
-}
-
