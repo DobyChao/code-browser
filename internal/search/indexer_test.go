@@ -73,6 +73,52 @@ func TestZoektServiceIndexRepositoryCreatesShard(t *testing.T) {
 	}
 }
 
+func TestZoektServiceIndexRepositoryInfersCurrentBranch(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git binary not available: %v", err)
+	}
+
+	dir := t.TempDir()
+	repoDir := filepath.Join(dir, "repo")
+	runGit(t, dir, "init", "repo")
+	runGit(t, repoDir, "checkout", "-b", "main")
+
+	if err := os.WriteFile(filepath.Join(repoDir, "hello.go"), []byte("package hello\n\nconst BranchName = \"main\"\n"), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "initial commit")
+
+	indexDir := filepath.Join(dir, "index")
+	svc := NewZoektServiceFromSearcher(nil, IndexOptions{IndexDir: indexDir})
+	err := svc.IndexRepository(context.Background(), repo.Repository{
+		RepoID:     7,
+		Name:       "branch-test",
+		SourcePath: repoDir,
+	}, IndexOptions{IndexDir: indexDir})
+	if err != nil {
+		t.Fatalf("IndexRepository failed: %v", err)
+	}
+
+	searcher, err := zoektsearch.NewDirectorySearcher(indexDir)
+	if err != nil {
+		t.Fatalf("open zoekt searcher: %v", err)
+	}
+	defer searcher.Close()
+
+	query, err := BuildZoektQuery([]repo.Repository{{RepoID: 7}}, SearchRequest{Query: "BranchName", Branch: "main"})
+	if err != nil {
+		t.Fatalf("BuildZoektQuery failed: %v", err)
+	}
+	result, err := searcher.Search(context.Background(), query, searchOptionsForPage(1, 10))
+	if err != nil {
+		t.Fatalf("search indexed shard: %v", err)
+	}
+	if len(result.Files) == 0 {
+		t.Fatalf("expected branch-filtered search to match inferred current branch")
+	}
+}
+
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)

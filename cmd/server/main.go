@@ -59,7 +59,6 @@ func main() {
 	zoektIndexDir := filepath.Join(*dataDir, "zoekt-index")
 	zoektService, err := search.NewZoektService(search.IndexOptions{
 		IndexDir:    zoektIndexDir,
-		Branches:    []string{"HEAD"},
 		Incremental: true,
 	})
 	if err != nil {
@@ -71,11 +70,14 @@ func main() {
 		}
 	}()
 	repoProvider.SetIndexRunner(repo.IndexRunnerFunc(func(ctx context.Context, repository repo.Repository) error {
-		return zoektService.IndexRepository(ctx, repository, search.IndexOptions{
+		if err := zoektService.IndexRepository(ctx, repository, search.IndexOptions{
 			IndexDir:    zoektIndexDir,
-			Branches:    []string{"HEAD"},
 			Incremental: true,
-		})
+		}); err != nil {
+			return err
+		}
+		appCache.Flush()
+		return nil
 	}))
 
 	// 3. 创建并配置搜索服务
@@ -98,6 +100,7 @@ func main() {
 	repoHandlers := &repo.Handlers{
 		Provider:   repoProvider,
 		AdminToken: *adminToken,
+		Cache:      appCache,
 	}
 
 	// 5. 创建路由器并集中注册所有服务的路由 (恢复简洁方式)

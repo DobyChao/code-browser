@@ -135,6 +135,16 @@ func TestUpdateJobStatus_Completed(t *testing.T) {
 	if status != "indexed" {
 		t.Errorf("期望仓库 index_status='indexed', 实际='%s'", status)
 	}
+	repoInfo, ok := p.GetRepo(1)
+	if !ok {
+		t.Fatal("expected repo 1")
+	}
+	if repoInfo.IndexStatus != "indexed" {
+		t.Fatalf("expected cached repo index_status='indexed', got %q", repoInfo.IndexStatus)
+	}
+	if repoInfo.LastIndexedAt == nil {
+		t.Fatal("expected cached repo last_indexed_at to be populated")
+	}
 }
 
 func TestUpdateJobStatus_Failed(t *testing.T) {
@@ -172,6 +182,16 @@ func TestUpdateJobStatus_Failed(t *testing.T) {
 	}
 	if status != "failed" {
 		t.Errorf("期望仓库 index_status='failed', 实际='%s'", status)
+	}
+	repoInfo, ok := p.GetRepo(1)
+	if !ok {
+		t.Fatal("expected repo 1")
+	}
+	if repoInfo.IndexStatus != "failed" {
+		t.Fatalf("expected cached repo index_status='failed', got %q", repoInfo.IndexStatus)
+	}
+	if repoInfo.LastIndexedAt == nil {
+		t.Fatal("expected cached repo last_indexed_at to be populated")
 	}
 }
 

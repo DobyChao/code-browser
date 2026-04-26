@@ -7,11 +7,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/patrickmn/go-cache"
 )
 
 type Handlers struct {
 	Provider   *Provider
 	AdminToken string
+	Cache      *cache.Cache
 }
 
 // AuthMiddleware checks for the correct admin token
@@ -58,7 +61,7 @@ func (h *Handlers) HandleAdd(w http.ResponseWriter, r *http.Request) {
 // Returns full repository details including path (Protected)
 func (h *Handlers) HandleListAdmin(w http.ResponseWriter, r *http.Request) {
 	repos := h.Provider.GetAll()
-	
+
 	type AdminRepoInfo struct {
 		ID            uint32 `json:"id"`
 		Name          string `json:"name"`
@@ -171,6 +174,9 @@ func (h *Handlers) HandleRegisterZoekt(w http.ResponseWriter, r *http.Request) {
 	if err := h.Provider.RegisterZoektIndex(uint32(id), req.Paths); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to register Zoekt file: %v", err), http.StatusInternalServerError)
 		return
+	}
+	if h.Cache != nil {
+		h.Cache.Flush()
 	}
 
 	w.WriteHeader(http.StatusOK)

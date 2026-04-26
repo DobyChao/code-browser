@@ -60,7 +60,7 @@ A lightweight code browsing service with a CLI to manage repositories and an HTT
   Example:
 
   ```bash
-  ./repo-server --port 8080 --data-dir ".data"
+  ./repo-server --data-dir ".data"
   ```
 
 **Dependencies**

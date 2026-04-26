@@ -93,7 +93,15 @@ func (p *Provider) UpdateJobStatus(jobID uint32, status IndexJobStatus, errMsg s
 		}
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if status == JobStatusCompleted || status == JobStatusFailed {
+		if err := p.loadReposFromDB(); err != nil {
+			return fmt.Errorf("刷新仓库缓存失败: %w", err)
+		}
+	}
+	return nil
 }
 
 // GetIndexJob 根据 ID 获取索引任务，未找到时返回 nil, nil
