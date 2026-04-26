@@ -69,17 +69,34 @@ On dashboard load:
 On manual index trigger:
 
 1. Confirm the user wants to create an index job.
-2. Call `POST /api/repositories/{id}/index`.
-3. Show a toast including the returned `job_id`.
-4. Refresh repositories so `index_status` can update.
-5. Refresh recent index jobs.
+2. Immediately disable the triggering button or switch it into a loading state.
+3. Call `POST /api/repositories/{id}/index`.
+4. Show a toast including the returned `job_id`.
+5. Refresh repositories so `index_status` can update.
+6. Refresh recent index jobs.
+7. Re-enable the button after the request and refresh work finishes, including failure paths.
 
-The page should not poll automatically in this first version. Manual refresh buttons are enough for the current scope.
+The page should not poll automatically in this first version. Manual refresh buttons are enough for the current scope. The "Index Jobs" card should include a small refresh button in its header so users can re-check asynchronous job progress without reloading the whole page.
+
+## Event Handling
+
+Use event delegation for repository-row actions instead of per-button inline handlers for the new index action. Bind the click handler to the repository table body or its stable parent container and identify index buttons through a `data-action="index"` and `data-repo-id` attribute.
+
+This keeps event handling stable when `renderRepos()` replaces table rows after refresh and avoids accumulating duplicate listeners.
+
+The existing page can keep unrelated legacy handlers until a broader admin-page cleanup, but the index scheduling UI should use delegation from the start.
+
+## Authorization Notes
+
+The job creation API keeps the existing route shape, `POST /api/repositories/{id}/index`, while the listing APIs are under `/api/admin/...`. The frontend must call all of them through the same `fetchAPI` helper so the `Authorization: Bearer <token>` header is attached consistently.
+
+This design does not require CORS changes because the admin page and API are served from the same local server in the current deployment model.
 
 ## Error Handling
 
 - Preserve the existing admin token behavior and `fetchAPI` error handling.
 - If `/api/admin/index-jobs` fails, show the existing toast error and leave the previous table state in place.
+- If job creation fails, restore the trigger button to its enabled state after showing the existing toast error.
 - If no jobs are returned, render a single empty-state row.
 - If `created_at` is missing or not parseable, render the original value or an empty string.
 
@@ -90,6 +107,10 @@ Use the current static HTML test style for this narrow integration:
 - Verify `admin.html` contains the index jobs table body.
 - Verify it calls `/api/admin/index-jobs?limit=20`.
 - Verify it has an `actions.triggerIndex` path using `/repositories/${id}/index`.
+- Verify the index action marks the triggering button disabled or loading while the request is in flight.
+- Verify the index action is reachable through delegated table events.
+- Verify the job creation call goes through `fetchAPI`, preserving admin-token authorization.
+- Verify the index jobs card includes a manual refresh button.
 - Verify the page includes visible "Index Jobs" copy.
 
 This is intentionally a characterization-style guard. If admin JavaScript continues growing, a later refactor should extract the script into a testable JS module.
