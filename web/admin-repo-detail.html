@@ -58,7 +58,7 @@
                     <h3 class="font-bold text-yellow-500 mb-2">💡 操作指南</h3>
                     <p class="mb-2">如果仓库非常庞大，建议在高性能机器上生成索引，然后将文件传输到此服务器。</p>
                     <ol class="list-decimal list-inside space-y-1 text-gray-300 mb-4">
-                        <li>在目标机器安装 <code class="text-xs">zoekt-git-index</code></li>
+                        <li>在目标机器构建并运行 <code class="text-xs">repo-cli</code></li>
                         <li>执行以下命令生成索引：</li>
                     </ol>
                     <pre class="bg-black p-3 rounded text-green-400 overflow-x-auto mb-4 select-all cursor-text"><code id="manual-index-cmd" class="bg-transparent text-green-400 p-0"></code></pre>
@@ -160,12 +160,8 @@
                 const cmd = `# 进入仓库目录
 cd /path/to/your/repo
 
-# 配置 Zoekt 元数据 (必须)
-git config zoekt.repoid ${repo.id}
-git config zoekt.name ${zoektName}
-
-# 生成索引 (在当前目录生成)
-zoekt-git-index -index . .`;
+# 使用内嵌 Zoekt 生成索引
+repo-cli -command index -id ${repo.id} -data-dir /path/to/data-dir`;
                 
                 document.getElementById('manual-index-cmd').textContent = cmd;
                 document.getElementById('example-shard-name').textContent = `${zoektName}.00000.zoekt`;

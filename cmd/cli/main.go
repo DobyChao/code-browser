@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 
 	"code-browser/internal/repo"
+	"code-browser/internal/search"
 )
 
 func main() {
@@ -38,6 +40,26 @@ func main() {
 			log.Printf("关闭数据库连接时出错: %v", err)
 		}
 	}()
+
+	zoektIndexDir := filepath.Join(*dataDir, "zoekt-index")
+	zoektService, err := search.NewZoektService(search.IndexOptions{
+		IndexDir:    zoektIndexDir,
+		Incremental: true,
+	})
+	if err != nil {
+		log.Fatalf("错误: 无法初始化 Zoekt 服务: %v", err)
+	}
+	defer func() {
+		if err := zoektService.Close(); err != nil {
+			log.Printf("关闭 Zoekt 服务时出错: %v", err)
+		}
+	}()
+	repoProvider.SetIndexRunner(repo.IndexRunnerFunc(func(ctx context.Context, repository repo.Repository) error {
+		return zoektService.IndexRepository(ctx, repository, search.IndexOptions{
+			IndexDir:    zoektIndexDir,
+			Incremental: true,
+		})
+	}))
 
 	// --- Execute Command ---
 	switch *command {
@@ -83,7 +105,7 @@ func main() {
 		if *repoID == 0 || *scipPath == "" {
 			log.Fatal("错误: register-scip 需要 --id 和 --scip-path")
 		}
-		
+
 		repoInfo, ok := repoProvider.GetRepo(uint32(*repoID))
 		if !ok {
 			log.Fatalf("仓库 %d 未找到", *repoID)

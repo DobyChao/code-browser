@@ -1,12 +1,12 @@
 package repo
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"io"
 	"log"
 	"os"
-	"os/exec" // Needed for running git and zoekt-git-index
 	"path/filepath"
 	"regexp"
 	"strconv" // Needed for converting uint32 to string for DataPath
@@ -14,23 +14,33 @@ import (
 	"sync" // Mutex for safe concurrent updates to cache
 	"time"
 
-	"github.com/go-git/go-git/v5"   // ★ 新增: go-git API
 	_ "github.com/mattn/go-sqlite3" // Import the SQLite driver
 )
 
 // Repository 定义了单个代码仓库的配置结构 (与数据库表对应)
 type Repository struct {
-	DBID          int64      `json:"-"`              // 数据库内部自增 ID
-	RepoID        uint32     `json:"id"`             // 用户定义的、API 使用的唯一 uint32 ID
-	Name          string     `json:"name"`           // 显示给用户的名称
-	SourcePath    string     `json:"-"`              // 仓库在文件系统中的绝对路径
-	DataPath      string     `json:"-"`              // 该仓库专属数据目录的路径
-	RemoteURL     string     `json:"remote_url"`     // 仓库远程 URL
-	DefaultBranch string     `json:"default_branch"` // 默认分支
-	IndexStatus   string     `json:"index_status"`   // 索引状态
+	DBID          int64      `json:"-"`               // 数据库内部自增 ID
+	RepoID        uint32     `json:"id"`              // 用户定义的、API 使用的唯一 uint32 ID
+	Name          string     `json:"name"`            // 显示给用户的名称
+	SourcePath    string     `json:"-"`               // 仓库在文件系统中的绝对路径
+	DataPath      string     `json:"-"`               // 该仓库专属数据目录的路径
+	RemoteURL     string     `json:"remote_url"`      // 仓库远程 URL
+	DefaultBranch string     `json:"default_branch"`  // 默认分支
+	IndexStatus   string     `json:"index_status"`    // 索引状态
 	LastIndexedAt *time.Time `json:"last_indexed_at"` // 最后索引时间
-	CreatedAt     time.Time  `json:"-"`              // 创建时间
-	UpdatedAt     time.Time  `json:"-"`              // 更新时间
+	CreatedAt     time.Time  `json:"-"`               // 创建时间
+	UpdatedAt     time.Time  `json:"-"`               // 更新时间
+}
+
+// IndexRunner indexes a repository using the configured search backend.
+type IndexRunner interface {
+	IndexRepository(ctx context.Context, repository Repository) error
+}
+
+type IndexRunnerFunc func(ctx context.Context, repository Repository) error
+
+func (f IndexRunnerFunc) IndexRepository(ctx context.Context, repository Repository) error {
+	return f(ctx, repository)
 }
 
 // Provider 是仓库管理服务，负责加载和提供仓库信息
@@ -40,6 +50,7 @@ type Provider struct {
 	repositories []Repository          // 按数据库顺序排列的仓库列表 (内存缓存)
 	repoMap      map[uint32]Repository // 用于通过 uint32 RepoID 快速查找仓库 (内存缓存)
 	mu           sync.RWMutex          // 用于保护内存缓存的读写锁
+	indexRunner  IndexRunner           // 索引执行器
 }
 
 const dbFileName = "app.db"
@@ -311,82 +322,46 @@ func (p *Provider) DeleteRepository(id uint32) error {
 	return p.loadReposFromDB()
 }
 
-// IndexRepositoryZoekt 为指定的 Git 仓库生成或更新 Zoekt 索引
+func (p *Provider) SetIndexRunner(runner IndexRunner) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.indexRunner = runner
+}
+
+func (p *Provider) getIndexRunner() IndexRunner {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.indexRunner
+}
+
+// IndexRepositoryZoekt 为指定的 Git 仓库生成或更新 Zoekt 索引.
+//
+// Deprecated: use an injected IndexRunner directly. This method remains as a
+// transitional wrapper for CLI callers.
 func (p *Provider) IndexRepositoryZoekt(id uint32) error {
 	repoInfo, ok := p.GetRepo(id) // Read lock
 	if !ok {
 		return fmt.Errorf("仓库 ID '%d' 未找到", id)
 	}
-
-	// ★ 1. 检查是否为 Git 仓库 (使用 go-git) ★
-	repo, err := git.PlainOpen(repoInfo.SourcePath)
-	if err != nil {
-		return fmt.Errorf("仓库 '%s' (%d) 在路径 '%s' 下不是一个有效的 Git 仓库 (go-git open 失败): %w", repoInfo.Name, id, repoInfo.SourcePath, err)
+	runner := p.getIndexRunner()
+	if runner == nil {
+		return fmt.Errorf("索引服务未初始化")
 	}
-
-	// 2. 确保全局 Zoekt 索引目录存在
-	zoektIndexPath := filepath.Join(p.DataDir, zoektIndexSubDir) // <dataDir>/zoekt-index/
-	if err := os.MkdirAll(zoektIndexPath, 0755); err != nil {
-		return fmt.Errorf("创建全局 Zoekt 索引目录 '%s' 失败: %w", zoektIndexPath, err)
-	}
-
-	// 3. 检查 zoekt-git-index 命令是否存在
-	zoektCmdPath, err := exec.LookPath("zoekt-git-index")
-	if err != nil {
-		return fmt.Errorf("错误: 'zoekt-git-index' 命令未找到。请确保已安装并配置在系统 PATH 中。参考 README.md")
-	}
-
-	// ★ 4. 更新仓库本地 Git 配置以包含 zoekt.repoid, zoekt.name (使用 go-git) ★
-	log.Printf("正在更新仓库 '%s' (%d) 的 .git/config...", repoInfo.Name, id)
-	cfg, err := repo.Config() // 读取 .git/config
-	if err != nil {
-		return fmt.Errorf("无法读取仓库 '%s' (%d) 的 .git/config 文件: %w", repoInfo.Name, id, err)
-	}
-
-	// ★ 新的 Zoekt 索引名称格式: "id(10位补0)_reponame" ★
-	// 确保仓库名对于文件名是安全的 (替换所有非字母数字字符为下划线)
-	reg := regexp.MustCompile("[^a-zA-Z0-9]+")
-	sanitizedName := reg.ReplaceAllString(repoInfo.Name, "_")
-	// 格式化 ID 为 10 位，用 0 填充
-	zoektName := fmt.Sprintf("%010d_%s", id, sanitizedName)
-	cfg.Raw.SetOption("zoekt", "", "name", zoektName)
-
-	repoIDStr := strconv.FormatUint(uint64(id), 10)
-	// section="zoekt", subsection="", key="repoid", value=repoIDStr
-	cfg.Raw.SetOption("zoekt", "", "repoid", repoIDStr)
-
-	if err := repo.SetConfig(cfg); err != nil { // 写回 .git/config
-		// 记录警告，但不一定是致命错误
-		log.Printf("警告: 无法将 zoekt.repoid 写入仓库 '%s' (%d) 的 .git/config: %v", repoInfo.Name, id, err)
-	} else {
-		log.Printf("成功更新仓库 '%s' (%d) 的 Git 配置 zoekt.repoid", repoInfo.Name, id)
-	}
-
-	// ★ 5. 执行 zoekt-git-index 命令 ★
-	// zoekt-git-index [-index indexDir] [-name repoName] repoDir
-	args := []string{
-		"-index", zoektIndexPath,
-		repoInfo.SourcePath,
-	}
-	zoektCmd := exec.Command(zoektCmdPath, args...)
-	zoektCmd.Stdout = os.Stdout // 将输出直接打印到控制台
-	zoektCmd.Stderr = os.Stderr
-	log.Printf("正在为仓库 '%s' (%d) 生成 Zoekt 索引...", repoInfo.Name, id)
-	log.Printf("执行命令: %s %s", zoektCmdPath, strings.Join(args, " "))
-
-	startTime := time.Now()
-	if err := zoektCmd.Run(); err != nil {
-		return fmt.Errorf("执行 zoekt-git-index 为仓库 '%s' (%d) 创建索引失败: %w", repoInfo.Name, id, err)
-	}
-
-	log.Printf("成功为仓库 '%s' (%d) 生成 Zoekt 索引 (名称: %s)，耗时: %v", repoInfo.Name, id, zoektName, time.Since(startTime))
-	return nil
+	return runner.IndexRepository(context.Background(), repoInfo)
 }
 
 // RunIndexJobAsync 异步执行索引任务
 func (p *Provider) RunIndexJobAsync(repoID uint32, jobType, triggerType string) (uint32, error) {
-	if _, ok := p.GetRepo(repoID); !ok {
+	repoInfo, ok := p.GetRepo(repoID)
+	if !ok {
 		return 0, fmt.Errorf("仓库 ID '%d' 未找到", repoID)
+	}
+	if jobType != "zoekt" {
+		return 0, fmt.Errorf("未知的索引类型: %s", jobType)
+	}
+	runner := p.getIndexRunner()
+	if runner == nil {
+		return 0, fmt.Errorf("索引服务未初始化")
 	}
 	jobID, err := p.CreateIndexJob(repoID, jobType, triggerType)
 	if err != nil {
@@ -394,18 +369,11 @@ func (p *Provider) RunIndexJobAsync(repoID uint32, jobType, triggerType string) 
 	}
 	go func() {
 		_ = p.UpdateJobStatus(jobID, JobStatusRunning, "")
-		var indexErr error
-		switch jobType {
-		case "zoekt":
-			indexErr = p.IndexRepositoryZoekt(repoID)
-		default:
-			indexErr = fmt.Errorf("未知的索引类型: %s", jobType)
+		if err := runner.IndexRepository(context.Background(), repoInfo); err != nil {
+			_ = p.UpdateJobStatus(jobID, JobStatusFailed, err.Error())
+			return
 		}
-		if indexErr != nil {
-			_ = p.UpdateJobStatus(jobID, JobStatusFailed, indexErr.Error())
-		} else {
-			_ = p.UpdateJobStatus(jobID, JobStatusCompleted, "")
-		}
+		_ = p.UpdateJobStatus(jobID, JobStatusCompleted, "")
 	}()
 	return jobID, nil
 }
@@ -471,7 +439,7 @@ func (p *Provider) RegisterZoektIndex(id uint32, zoektPaths []string) error {
 		baseName := filepath.Base(srcPath)
 		// 预期格式: 任意前缀.00000.zoekt
 		// 我们需要提取后缀 .00000.zoekt
-		
+
 		// 简单处理: 查找倒数第二个点，保留后缀
 		parts := strings.Split(baseName, ".")
 		var suffix string
@@ -481,7 +449,7 @@ func (p *Provider) RegisterZoektIndex(id uint32, zoektPaths []string) error {
 		} else {
 			// 如果不符合标准分片格式，默认使用 .00000.zoekt (但这可能会导致多文件冲突，如果用户上传了多个不带分片号的文件)
 			// 为了支持用户手动指定的不带分片号的文件，我们可以简单地按顺序分配
-			// 但这里假设用户上传的是 zoekt-git-index 生成的标准文件
+			// 但这里假设用户上传的是标准 Zoekt 分片文件
 			return fmt.Errorf("文件名 '%s' 不符合 Zoekt 分片格式 (例如 .00000.zoekt)", baseName)
 		}
 

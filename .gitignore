@@ -1,0 +1,12 @@
+.gitignore
+.data
+.trae
+repo-cli
+repo-server
+temp.txt
+logs
+quick-debug.sh
+package.sh
+release/
+node_modules/
+worktrees/

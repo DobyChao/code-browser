@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"code-browser/internal/analysis"
@@ -54,17 +56,35 @@ func main() {
 
 	coreService := core.NewService(repoProvider, appCache)
 
-	zoektEngine := &search.ZoektEngine{ApiUrl: "http://localhost:6070"}
-	ripgrepEngine := &search.RipgrepEngine{}
+	zoektIndexDir := filepath.Join(*dataDir, "zoekt-index")
+	zoektService, err := search.NewZoektService(search.IndexOptions{
+		IndexDir:    zoektIndexDir,
+		Incremental: true,
+	})
+	if err != nil {
+		log.Fatalf("错误: 无法初始化 Zoekt 服务: %v", err)
+	}
+	defer func() {
+		if err := zoektService.Close(); err != nil {
+			log.Printf("关闭 Zoekt 服务时出错: %v", err)
+		}
+	}()
+	repoProvider.SetIndexRunner(repo.IndexRunnerFunc(func(ctx context.Context, repository repo.Repository) error {
+		if err := zoektService.IndexRepository(ctx, repository, search.IndexOptions{
+			IndexDir:    zoektIndexDir,
+			Incremental: true,
+		}); err != nil {
+			return err
+		}
+		appCache.Flush()
+		return nil
+	}))
 
 	// 3. 创建并配置搜索服务
 	searchHandlers := &search.Handlers{
 		RepoProvider: repoProvider,
-		Engines: map[string]search.Engine{
-			"zoekt":   zoektEngine,
-			"ripgrep": ripgrepEngine,
-		},
-		Cache: appCache,
+		Service:      zoektService,
+		Cache:        appCache,
 	}
 
 	// 4. 创建核心服务
@@ -73,13 +93,14 @@ func main() {
 		Service:      coreService,
 	}
 
-	analysisService := analysis.NewService(repoProvider, zoektEngine, coreService)
+	analysisService := analysis.NewService(repoProvider, zoektService, coreService)
 	analysisHandlers := &analysis.Handlers{Service: analysisService}
 
 	// 5.1 创建仓库管理 Handler
 	repoHandlers := &repo.Handlers{
 		Provider:   repoProvider,
 		AdminToken: *adminToken,
+		Cache:      appCache,
 	}
 
 	// 5. 创建路由器并集中注册所有服务的路由 (恢复简洁方式)

@@ -75,7 +75,6 @@
                     <div class="mt-1 flex">
                         <select id="search-engine-select" class="custom-select pl-3 pr-8 py-2 text-base bg-gray-800 border-gray-600 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-l-md text-white">
                             <option value="zoekt">Zoekt (索引)</option>
-                            <option value="ripgrep">Ripgrep (实时)</option>
                         </select>
                         <input type="text" id="content-search-input" class="flex-1 min-w-0 block w-full px-3 py-2 rounded-none sm:text-sm bg-gray-700 border-gray-600 text-white" placeholder="在当前仓库搜索...">
                         <button id="content-search-button" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-r-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">搜索</button>
@@ -338,8 +337,8 @@
                 }
                 render.status('正在搜索内容...');
                 try {
-                    const results = await api.searchContent(state.currentRepoId, query, engine);
-                    dom.listPanel.innerHTML = render.contentSearchResults(results);
+                    const response = await api.searchContent(state.currentRepoId, query, engine);
+                    dom.listPanel.innerHTML = render.contentSearchResults(response.results || response);
                 } catch (error) {
                     console.error('内容搜索失败:', error);
                     render.status('内容搜索失败，请检查后端服务。');
@@ -356,8 +355,8 @@
                 }
                 render.status('正在搜索文件名...');
                 try {
-                    const results = await api.searchFiles(state.currentRepoId, query, engine);
-                    dom.listPanel.innerHTML = render.fileSearchResults(results);
+                    const response = await api.searchFiles(state.currentRepoId, query, engine);
+                    dom.listPanel.innerHTML = render.fileSearchResults(response.files || response);
                 } catch (error) {
                     console.error('文件名搜索失败:', error);
                     render.status('文件名搜索失败。');

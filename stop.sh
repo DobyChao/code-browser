@@ -20,11 +20,11 @@ stop_by_pid() {
 
 # 方法 1：尝试用 PID 文件关
 stop_by_pid "$LOG_DIR/repo-server.pid" "repo-server"
-stop_by_pid "$LOG_DIR/zoekt.pid" "zoekt-webserver"
+stop_by_pid "$LOG_DIR/zoekt.pid" "old zoekt-webserver"
 
 # 方法 2：兜底 —— 用 pkill 精准匹配命令（防止 PID 失效）
 echo "🧹 清理残留进程..."
-pkill -f "zoekt-webserver.*\.data/zoekt-index" 2>/dev/null && echo "   killed zoekt" || true
+pkill -f "zoekt-webserver.*\.data/zoekt-index" 2>/dev/null && echo "   killed old zoekt-webserver" || true
 pkill -f "\./repo-server$" 2>/dev/null && echo "   killed repo-server" || true
 
 echo "✅ 所有服务已停止"

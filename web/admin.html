@@ -17,6 +17,11 @@
         .btn-danger:hover { background-color: #c53030; }
         .btn-secondary { background-color: #718096; color: white; }
         .btn-secondary:hover { background-color: #4a5568; }
+        .status-pill { display: inline-flex; align-items: center; padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; }
+        .status-none { background-color: #4a5568; color: #cbd5e0; }
+        .status-pending, .status-running, .status-indexing { background-color: #975a16; color: #fefcbf; }
+        .status-indexed, .status-completed { background-color: #22543d; color: #c6f6d5; }
+        .status-failed { background-color: #742a2a; color: #fed7d7; }
         #toast { visibility: hidden; min-width: 250px; margin-left: -125px; background-color: #333; color: #fff; text-align: center; border-radius: 4px; padding: 16px; position: fixed; z-index: 50; left: 50%; bottom: 30px; opacity: 0; transition: opacity 0.5s; }
         #toast.show { visibility: visible; opacity: 1; }
         .modal { display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.5); }
@@ -76,12 +81,39 @@
                         <tr class="text-gray-400 border-b border-gray-600">
                             <th class="p-3">ID</th>
                             <th class="p-3">名称</th>
+                            <th class="p-3">索引状态</th>
                             <th class="p-3">路径</th>
                             <th class="p-3 text-center">操作</th>
                         </tr>
                     </thead>
                     <tbody id="repo-table-body">
                         <!-- Rows will be injected here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Index Jobs -->
+        <div class="card">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold">索引任务</h2>
+                <button id="refresh-index-jobs-btn" class="btn btn-secondary text-sm">刷新</button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="text-gray-400 border-b border-gray-600">
+                            <th class="p-3">任务 ID</th>
+                            <th class="p-3">仓库</th>
+                            <th class="p-3">类型</th>
+                            <th class="p-3">触发</th>
+                            <th class="p-3">状态</th>
+                            <th class="p-3">创建时间</th>
+                            <th class="p-3">错误</th>
+                        </tr>
+                    </thead>
+                    <tbody id="index-job-table-body">
+                        <!-- Index job rows will be injected here -->
                     </tbody>
                 </table>
             </div>
@@ -157,6 +189,7 @@
         const state = {
             token: localStorage.getItem('adminToken') || '',
             repos: [],
+            indexJobs: [],
             feedbacks: []
         };
 
@@ -169,6 +202,8 @@
             repoTableBody: document.getElementById('repo-table-body'),
             addRepoForm: document.getElementById('add-repo-form'),
             refreshBtn: document.getElementById('refresh-btn'),
+            indexJobTableBody: document.getElementById('index-job-table-body'),
+            refreshIndexJobsBtn: document.getElementById('refresh-index-jobs-btn'),
             feedbackTableBody: document.getElementById('feedback-table-body'),
             refreshFeedbackBtn: document.getElementById('refresh-feedback-btn'),
             toast: document.getElementById('toast'),
@@ -193,7 +228,7 @@
         function showDashboard() {
             dom.loginSection.style.display = 'none';
             dom.dashboardSection.style.display = 'block';
-            fetchRepos();
+            fetchRepos().then(fetchIndexJobs);
             fetchFeedbacks();
         }
 
@@ -248,6 +283,7 @@
                 if (!res) return;
                 state.repos = await res.json();
                 renderRepos();
+                if (state.indexJobs.length > 0) renderIndexJobs();
             } catch (e) { console.error(e); }
         }
 
@@ -260,20 +296,59 @@
             } catch (e) { console.error(e); }
         }
 
+        async function fetchIndexJobs() {
+            try {
+                const res = await fetchAPI('/admin/index-jobs?limit=20');
+                if (!res) return;
+                const data = await res.json();
+                state.indexJobs = data.jobs || [];
+                renderIndexJobs();
+            } catch (e) { console.error(e); }
+        }
+
         function renderRepos() {
             dom.repoTableBody.innerHTML = state.repos.map(repo => `
                 <tr class="border-b border-gray-700 hover:bg-gray-700 cursor-pointer" onclick="actions.viewDetails(${repo.id})">
                     <td class="p-3">${repo.id}</td>
                     <td class="p-3 font-bold text-blue-300">${repo.name}</td>
+                    <td class="p-3">${statusPill(repo.index_status || 'none')}</td>
                     <td class="p-3 text-sm text-gray-400 font-mono truncate max-w-xs" title="${repo.path}">${repo.path || '(路径未公开)'}</td>
-                    <td class="p-3 text-center">
+                    <td class="p-3 text-center space-x-2" onclick="event.stopPropagation()">
+                        <button
+                            type="button"
+                            data-action="index"
+                            data-repo-id="${repo.id}"
+                            class="text-xs bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-2 py-1 rounded"
+                        >索引</button>
                         <button onclick="event.stopPropagation(); actions.deleteRepo(${repo.id})" class="text-xs bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded">删除</button>
                     </td>
                 </tr>
             `).join('');
             
             if (state.repos.length === 0) {
-                dom.repoTableBody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-gray-500">暂无仓库</td></tr>`;
+                dom.repoTableBody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-gray-500">暂无仓库</td></tr>`;
+            }
+        }
+
+        function renderIndexJobs() {
+            dom.indexJobTableBody.innerHTML = state.indexJobs.map(job => {
+                const repo = state.repos.find(r => r.id === job.repo_id);
+                const repoLabel = repo ? `${repo.name} (${job.repo_id})` : job.repo_id;
+                return `
+                    <tr class="border-b border-gray-700 hover:bg-gray-700">
+                        <td class="p-3 text-sm font-mono">${job.id}</td>
+                        <td class="p-3 text-sm">${repoLabel}</td>
+                        <td class="p-3 text-sm">${job.type}</td>
+                        <td class="p-3 text-sm">${job.trigger_type}</td>
+                        <td class="p-3">${statusPill(job.status)}</td>
+                        <td class="p-3 text-xs text-gray-400">${formatDate(job.created_at)}</td>
+                        <td class="p-3 text-xs text-red-300 max-w-xs truncate" title="${job.error || ''}">${job.error || ''}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            if (state.indexJobs.length === 0) {
+                dom.indexJobTableBody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-gray-500">暂无索引任务</td></tr>`;
             }
         }
 
@@ -324,7 +399,16 @@
         });
 
         dom.refreshBtn.addEventListener('click', fetchRepos);
+        dom.refreshIndexJobsBtn.addEventListener('click', fetchIndexJobs);
         dom.refreshFeedbackBtn.addEventListener('click', fetchFeedbacks);
+
+        dom.repoTableBody.addEventListener('click', (event) => {
+            const button = event.target.closest('[data-action="index"]');
+            if (!button) return;
+            event.preventDefault();
+            event.stopPropagation();
+            actions.triggerIndex(parseInt(button.dataset.repoId, 10), button);
+        });
 
         dom.modalCloseBtns.forEach(btn => {
             btn.addEventListener('click', () => {
@@ -350,6 +434,29 @@
                     showToast('仓库已删除');
                     fetchRepos();
                 } catch (e) {}
+            },
+            async triggerIndex(id, button) {
+                if (!confirm(`确定要为仓库 ID ${id} 创建索引任务吗？`)) return;
+                if (button) {
+                    button.disabled = true;
+                    button.dataset.originalText = button.textContent;
+                    button.textContent = '创建中...';
+                }
+                try {
+                    const res = await fetchAPI(`/repositories/${id}/index`, { method: 'POST' });
+                    const data = await res.json();
+                    showToast(`索引任务已创建: #${data.job_id}`);
+                    await fetchRepos();
+                    await fetchIndexJobs();
+                } catch (e) {
+                    // handled by fetchAPI
+                } finally {
+                    if (button) {
+                        button.disabled = false;
+                        button.textContent = button.dataset.originalText || '索引';
+                        delete button.dataset.originalText;
+                    }
+                }
             },
             async updateFeedbackStatus(id, status) {
                 try {
@@ -396,6 +503,18 @@
             dom.toast.textContent = msg;
             dom.toast.classList.add("show");
             setTimeout(() => { dom.toast.classList.remove("show"); }, 3000);
+        }
+
+        function statusPill(status) {
+            const normalized = (status || 'none').toString();
+            return `<span class="status-pill status-${normalized}">${normalized}</span>`;
+        }
+
+        function formatDate(value) {
+            if (!value) return '';
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) return value;
+            return date.toLocaleString();
         }
 
         // Init

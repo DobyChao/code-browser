@@ -3,6 +3,7 @@ package analysis
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -19,21 +20,25 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+type SearchFallback interface {
+	SearchContent(ctx context.Context, repos []repo.Repository, req search.SearchRequest) (*search.SearchResponse, error)
+}
+
 type Service struct {
 	RepoProvider *repo.Provider
-	SearchEngine search.Engine
+	Search       SearchFallback
 	CoreService  *core.Service // ★ 注入 CoreService
 	ScipCache    *cache.Cache  // ★ SCIP 索引缓存
 }
 
 // NewService 创建一个新的分析服务
-func NewService(repoProvider *repo.Provider, searchEngine search.Engine, coreService *core.Service) *Service {
+func NewService(repoProvider *repo.Provider, searchService SearchFallback, coreService *core.Service) *Service {
 	// SCIP 索引文件通常较大，但解析结构体相对较小，且访问频率高。
 	// 设置较长的过期时间，例如 1 小时。
 	scipCache := cache.New(cache.NoExpiration, cache.NoExpiration)
 	return &Service{
 		RepoProvider: repoProvider,
-		SearchEngine: searchEngine,
+		Search:       searchService,
 		CoreService:  coreService,
 		ScipCache:    scipCache,
 	}
@@ -99,20 +104,26 @@ func (s *Service) getDefinitionFromSearch(repoInfo repo.Repository, filePath str
 	}
 	log.Printf("DEBUG: Fallback 搜索符号: %s", symbol)
 
-	var query string
-	if _, ok := s.SearchEngine.(*search.ZoektEngine); ok {
-		query = fmt.Sprintf("sym:%s", symbol)
-	} else {
-		query = fmt.Sprintf("\\b%s\\b", symbol)
+	if s.Search == nil {
+		return nil, fmt.Errorf("搜索服务未初始化")
 	}
 
-	searchResults, err := s.SearchEngine.SearchContent(repoInfo, query)
-
-	if err != nil || len(searchResults) == 0 {
-		if _, ok := s.SearchEngine.(*search.ZoektEngine); ok {
-			log.Printf("DEBUG: 符号搜索无结果，尝试纯文本全字匹配")
-			query = fmt.Sprintf("\\b%s\\b", symbol)
-			searchResults, err = s.SearchEngine.SearchContent(repoInfo, query)
+	query := fmt.Sprintf("sym:%s", symbol)
+	searchResp, err := s.Search.SearchContent(context.Background(), []repo.Repository{repoInfo}, search.SearchRequest{
+		Query:    query,
+		Page:     1,
+		PageSize: 50,
+	})
+	if err != nil || searchResp == nil || len(searchResp.Results) == 0 {
+		log.Printf("DEBUG: 符号搜索无结果，尝试纯文本全字匹配")
+		query = fmt.Sprintf("\\b%s\\b", symbol)
+		searchResp, err = s.Search.SearchContent(context.Background(), []repo.Repository{repoInfo}, search.SearchRequest{
+			Query:    query,
+			Page:     1,
+			PageSize: 50,
+		})
+		if searchResp == nil {
+			searchResp = &search.SearchResponse{}
 		}
 	}
 
@@ -122,7 +133,7 @@ func (s *Service) getDefinitionFromSearch(repoInfo repo.Repository, filePath str
 
 	var definitions []AnalysisResult
 	repoIDStr := strconv.FormatUint(uint64(repoInfo.RepoID), 10)
-	for _, res := range searchResults {
+	for _, res := range searchResp.Results {
 		def := AnalysisResult{
 			Kind:     "definition",
 			RepoID:   repoIDStr,
@@ -369,18 +380,24 @@ func (s *Service) getReferencesFromSearch(repoInfo repo.Repository, filePath str
 	if symbol == "" {
 		return nil, fmt.Errorf("光标处未找到有效符号")
 	}
-	query := fmt.Sprintf("\\b%s\\b", symbol)
-	if _, ok := s.SearchEngine.(*search.ZoektEngine); ok {
-		// Zoekt can use sym: for symbol-aware searches but references vary; use text fallback
-		query = fmt.Sprintf("\\b%s\\b", symbol)
+	if s.Search == nil {
+		return nil, fmt.Errorf("搜索服务未初始化")
 	}
-	results, err := s.SearchEngine.SearchContent(repoInfo, query)
+	query := fmt.Sprintf("\\b%s\\b", symbol)
+	searchResp, err := s.Search.SearchContent(context.Background(), []repo.Repository{repoInfo}, search.SearchRequest{
+		Query:    query,
+		Page:     1,
+		PageSize: 50,
+	})
 	if err != nil {
 		return nil, err
 	}
+	if searchResp == nil {
+		searchResp = &search.SearchResponse{}
+	}
 	repoIDStr := strconv.FormatUint(uint64(repoInfo.RepoID), 10)
 	var out []AnalysisResult
-	for _, r := range results {
+	for _, r := range searchResp.Results {
 		out = append(out, AnalysisResult{
 			Kind:     "reference",
 			RepoID:   repoIDStr,
