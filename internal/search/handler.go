@@ -63,7 +63,8 @@ func (h *Handlers) SearchContent(w http.ResponseWriter, r *http.Request) {
 	cacheKey := contentCacheKey(repoID, req)
 	if data, found := h.Cache.Get(cacheKey); found {
 		log.Printf("DEBUG: 缓存命中 (search-content): %s", cacheKey)
-		writeJSON(w, data)
+		resp := data.(*SearchResponse)
+		writeJSON(w, formatResponse(r.URL.Query().Get("format"), resp.Results, resp))
 		return
 	}
 
@@ -75,7 +76,7 @@ func (h *Handlers) SearchContent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.Cache.Set(cacheKey, results, cache.DefaultExpiration)
-	writeJSON(w, results)
+	writeJSON(w, formatResponse(r.URL.Query().Get("format"), results.Results, results))
 }
 
 // SearchFiles 处理文件名搜索请求
@@ -111,7 +112,8 @@ func (h *Handlers) SearchFiles(w http.ResponseWriter, r *http.Request) {
 	cacheKey := filesCacheKey(repoID, req)
 	if data, found := h.Cache.Get(cacheKey); found {
 		log.Printf("DEBUG: 缓存命中 (search-files): %s", cacheKey)
-		writeJSON(w, data)
+		resp := data.(*FileSearchResponse)
+		writeJSON(w, formatResponse(r.URL.Query().Get("format"), resp.Files, resp))
 		return
 	}
 
@@ -123,7 +125,7 @@ func (h *Handlers) SearchFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.Cache.Set(cacheKey, results, cache.DefaultExpiration)
-	writeJSON(w, results)
+	writeJSON(w, formatResponse(r.URL.Query().Get("format"), results.Files, results))
 }
 
 func validateSearchEngine(engineName string) error {
@@ -217,6 +219,13 @@ func searchErrorStatus(err error) int {
 		return http.StatusBadRequest
 	}
 	return http.StatusInternalServerError
+}
+
+func formatResponse(format string, flat any, structured any) any {
+	if format == "v2" {
+		return structured
+	}
+	return flat
 }
 
 func writeJSON(w http.ResponseWriter, data any) {

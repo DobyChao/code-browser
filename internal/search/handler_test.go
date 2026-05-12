@@ -78,7 +78,7 @@ func TestSearchContentUsesServiceRequestAndCache(t *testing.T) {
 	}
 
 	first := httptest.NewRecorder()
-	handlers.SearchContent(first, searchRequest("/api/repositories/7/search?q=needle&branch=main&file=internal/.*\\.go&page=2&page_size=25", "7"))
+	handlers.SearchContent(first, searchRequest("/api/repositories/7/search?q=needle&branch=main&file=internal/.*\\.go&page=2&page_size=25&format=v2", "7"))
 
 	if first.Code != http.StatusOK {
 		t.Fatalf("first response status = %d, body = %s", first.Code, first.Body.String())
@@ -102,7 +102,7 @@ func TestSearchContentUsesServiceRequestAndCache(t *testing.T) {
 	}
 
 	second := httptest.NewRecorder()
-	handlers.SearchContent(second, searchRequest("/api/repositories/7/search?q=needle&branch=main&file=internal/.*\\.go&page=2&page_size=25", "7"))
+	handlers.SearchContent(second, searchRequest("/api/repositories/7/search?q=needle&branch=main&file=internal/.*\\.go&page=2&page_size=25&format=v2", "7"))
 
 	if second.Code != http.StatusOK {
 		t.Fatalf("second response status = %d, body = %s", second.Code, second.Body.String())
@@ -112,7 +112,7 @@ func TestSearchContentUsesServiceRequestAndCache(t *testing.T) {
 	}
 
 	third := httptest.NewRecorder()
-	handlers.SearchContent(third, searchRequest("/api/repositories/7/search?q=needle&branch=dev&file=internal/.*\\.go&page=2&page_size=25", "7"))
+	handlers.SearchContent(third, searchRequest("/api/repositories/7/search?q=needle&branch=dev&file=internal/.*\\.go&page=2&page_size=25&format=v2", "7"))
 
 	if third.Code != http.StatusOK {
 		t.Fatalf("third response status = %d, body = %s", third.Code, third.Body.String())
@@ -155,7 +155,7 @@ func TestSearchFilesUsesServiceRequestAndCache(t *testing.T) {
 	}
 
 	first := httptest.NewRecorder()
-	handlers.SearchFiles(first, searchRequest("/api/repositories/7/search-files?q=handler&branch=main&page=3&page_size=10", "7"))
+	handlers.SearchFiles(first, searchRequest("/api/repositories/7/search-files?q=handler&branch=main&page=3&page_size=10&format=v2", "7"))
 
 	if first.Code != http.StatusOK {
 		t.Fatalf("first response status = %d, body = %s", first.Code, first.Body.String())
@@ -179,7 +179,7 @@ func TestSearchFilesUsesServiceRequestAndCache(t *testing.T) {
 	}
 
 	second := httptest.NewRecorder()
-	handlers.SearchFiles(second, searchRequest("/api/repositories/7/search-files?q=handler&branch=main&page=3&page_size=10", "7"))
+	handlers.SearchFiles(second, searchRequest("/api/repositories/7/search-files?q=handler&branch=main&page=3&page_size=10&format=v2", "7"))
 
 	if second.Code != http.StatusOK {
 		t.Fatalf("second response status = %d, body = %s", second.Code, second.Body.String())
@@ -189,7 +189,7 @@ func TestSearchFilesUsesServiceRequestAndCache(t *testing.T) {
 	}
 
 	third := httptest.NewRecorder()
-	handlers.SearchFiles(third, searchRequest("/api/repositories/7/search-files?q=handler&branch=main&page=4&page_size=10", "7"))
+	handlers.SearchFiles(third, searchRequest("/api/repositories/7/search-files?q=handler&branch=main&page=4&page_size=10&format=v2", "7"))
 
 	if third.Code != http.StatusOK {
 		t.Fatalf("third response status = %d, body = %s", third.Code, third.Body.String())
@@ -249,6 +249,102 @@ func TestSearchContentReturnsBadRequestForInvalidSearchRequest(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestSearchContentFormatParameter(t *testing.T) {
+	provider := newTestRepoProvider(t)
+	service := &recordingSearchService{
+		contentResp: &SearchResponse{
+			Results: []SearchResult{{Path: "a.go", LineNum: 1, LineText: "needle"}},
+			Total:   1, Page: 1, PageSize: 50,
+		},
+	}
+	handlers := &Handlers{
+		Service:      service,
+		RepoProvider: provider,
+		Cache:        cache.New(time.Minute, time.Minute),
+	}
+
+	// No format param → flat array (old format)
+	w1 := httptest.NewRecorder()
+	handlers.SearchContent(w1, searchRequest("/api/repositories/7/search?q=needle", "7"))
+	var arr []SearchResult
+	if err := json.NewDecoder(w1.Body).Decode(&arr); err != nil {
+		t.Fatalf("decode no-format response: %v", err)
+	}
+	if len(arr) != 1 || arr[0].Path != "a.go" {
+		t.Fatalf("no-format response = %v", arr)
+	}
+
+	// format=v1 → flat array (old format)
+	w2 := httptest.NewRecorder()
+	handlers.SearchContent(w2, searchRequest("/api/repositories/7/search?q=needle&format=v1", "7"))
+	var arr2 []SearchResult
+	if err := json.NewDecoder(w2.Body).Decode(&arr2); err != nil {
+		t.Fatalf("decode v1 response: %v", err)
+	}
+	if len(arr2) != 1 || arr2[0].Path != "a.go" {
+		t.Fatalf("v1 response = %v", arr2)
+	}
+
+	// format=v2 → paginated object (new format)
+	w3 := httptest.NewRecorder()
+	handlers.SearchContent(w3, searchRequest("/api/repositories/7/search?q=needle&format=v2", "7"))
+	var obj SearchResponse
+	if err := json.NewDecoder(w3.Body).Decode(&obj); err != nil {
+		t.Fatalf("decode v2 response: %v", err)
+	}
+	if obj.Total != 1 || len(obj.Results) != 1 || obj.Results[0].Path != "a.go" {
+		t.Fatalf("v2 response = %#v", obj)
+	}
+}
+
+func TestSearchFilesFormatParameter(t *testing.T) {
+	provider := newTestRepoProvider(t)
+	service := &recordingSearchService{
+		fileResp: &FileSearchResponse{
+			Files:    []string{"a.go"},
+			Total:    1, Page: 1, PageSize: 50,
+		},
+	}
+	handlers := &Handlers{
+		Service:      service,
+		RepoProvider: provider,
+		Cache:        cache.New(time.Minute, time.Minute),
+	}
+
+	// No format param → flat array (old format)
+	w1 := httptest.NewRecorder()
+	handlers.SearchFiles(w1, searchRequest("/api/repositories/7/search-files?q=handler", "7"))
+	var arr []string
+	if err := json.NewDecoder(w1.Body).Decode(&arr); err != nil {
+		t.Fatalf("decode no-format response: %v", err)
+	}
+	if len(arr) != 1 || arr[0] != "a.go" {
+		t.Fatalf("no-format response = %v", arr)
+	}
+
+	// format=v1 → flat array (old format)
+	w2 := httptest.NewRecorder()
+	handlers.SearchFiles(w2, searchRequest("/api/repositories/7/search-files?q=handler&format=v1", "7"))
+	var arr2 []string
+	if err := json.NewDecoder(w2.Body).Decode(&arr2); err != nil {
+		t.Fatalf("decode v1 response: %v", err)
+	}
+	if len(arr2) != 1 || arr2[0] != "a.go" {
+		t.Fatalf("v1 response = %v", arr2)
+	}
+
+	// format=v2 → paginated object (new format)
+	w3 := httptest.NewRecorder()
+	handlers.SearchFiles(w3, searchRequest("/api/repositories/7/search-files?q=handler&format=v2", "7"))
+	var obj FileSearchResponse
+	if err := json.NewDecoder(w3.Body).Decode(&obj); err != nil {
+		t.Fatalf("decode v2 response: %v", err)
+	}
+	if obj.Total != 1 || len(obj.Files) != 1 || obj.Files[0] != "a.go" {
+		t.Fatalf("v2 response = %#v", obj)
 	}
 }
 

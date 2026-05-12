@@ -99,11 +99,12 @@ func (s *ZoektService) Close() error {
 	return nil
 }
 
+const maxSearchMatches = 10000
+
 func searchOptionsForPage(page, pageSize int) *zoekt.SearchOptions {
-	limit := page * pageSize
 	return &zoekt.SearchOptions{
-		ShardMaxMatchCount:   limit,
-		TotalMaxMatchCount:   limit,
-		MaxMatchDisplayCount: limit,
+		ShardMaxMatchCount:   maxSearchMatches,
+		TotalMaxMatchCount:   maxSearchMatches,
+		MaxMatchDisplayCount: maxSearchMatches,
 	}
 }

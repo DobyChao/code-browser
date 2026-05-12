@@ -37,8 +37,24 @@
 ## Search
 ### GET `/api/repositories/{id}/search?q=<query>`
 - Description: Content search, returning match positions and line fragments.
-- Query params: `q` (required), `branch`, `file`, `page`, and `page_size` are optional. `engine` is deprecated; `engine=ripgrep` returns `400 Bad Request`.
-- Response:
+- Query params: `q` (required), `branch`, `file`, `page`, `page_size`, and `format` are optional. `engine` is deprecated; `engine=ripgrep` returns `400 Bad Request`.
+- `format` parameter controls response shape:
+  - Omit or `format=v1` (default): returns a flat array (backward compatible).
+  - `format=v2`: returns a paginated object with `results`, `total`, `page`, `page_size`, and optionally `truncated`.
+- `truncated` field (only in `format=v2`): `true` when total matches exceed the internal limit (10000). Indicates the `total` is a lower bound and results may be incomplete. Advise users to narrow the search query.
+- Response (default / `format=v1`):
+  ```json
+  [
+    {
+      "repo_name": "string",
+      "path": "string",
+      "lineNum": 123,
+      "lineText": "string",
+      "fragments": [{ "offset": 0, "length": 5 }]
+    }
+  ]
+  ```
+- Response (`format=v2`):
   ```json
   {
     "results": [
@@ -52,20 +68,29 @@
     ],
     "total": 1,
     "page": 1,
-    "page_size": 50
+    "page_size": 50,
+    "truncated": false
   }
   ```
 
 ### GET `/api/repositories/{id}/search-files?q=<query>`
 - Description: File name search, returning matched file paths.
-- Query params: `q` (required), `branch`, `page`, and `page_size` are optional. `engine=ripgrep` returns `400 Bad Request`.
-- Response:
+- Query params: `q` (required), `branch`, `page`, `page_size`, and `format` are optional. `engine=ripgrep` returns `400 Bad Request`.
+- `format` parameter controls response shape:
+  - Omit or `format=v1` (default): returns a flat array (backward compatible).
+  - `format=v2`: returns a paginated object with `files`, `total`, `page`, `page_size`.
+- Response (default / `format=v1`):
+  ```json
+  ["path/to/file"]
+  ```
+- Response (`format=v2`):
   ```json
   {
     "files": ["path/to/file"],
     "total": 1,
     "page": 1,
-    "page_size": 50
+    "page_size": 50,
+    "truncated": false
   }
   ```
 

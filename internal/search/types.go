@@ -37,17 +37,19 @@ type FileSearchRequest struct {
 }
 
 type SearchResponse struct {
-	Results  []SearchResult `json:"results"`
-	Total    int            `json:"total"`
-	Page     int            `json:"page"`
-	PageSize int            `json:"page_size"`
+	Results   []SearchResult `json:"results"`
+	Total     int            `json:"total"`
+	Page      int            `json:"page"`
+	PageSize  int            `json:"page_size"`
+	Truncated bool           `json:"truncated,omitempty"`
 }
 
 type FileSearchResponse struct {
-	Files    []string `json:"files"`
-	Total    int      `json:"total"`
-	Page     int      `json:"page"`
-	PageSize int      `json:"page_size"`
+	Files     []string `json:"files"`
+	Total     int      `json:"total"`
+	Page      int      `json:"page"`
+	PageSize  int      `json:"page_size"`
+	Truncated bool           `json:"truncated,omitempty"`
 }
 
 type IndexOptions struct {

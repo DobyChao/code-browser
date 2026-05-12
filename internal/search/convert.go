@@ -35,6 +35,9 @@ func ConvertSearchResult(src *zoekt.SearchResult, req SearchRequest) *SearchResp
 	if src.MatchCount > resp.Total {
 		resp.Total = src.MatchCount
 	}
+	if resp.Total >= maxSearchMatches {
+		resp.Truncated = true
+	}
 	resp.Results = pageSlice(resp.Results, req.Page, req.PageSize)
 	return resp
 }
@@ -61,6 +64,9 @@ func ConvertFileSearchResult(src *zoekt.SearchResult, req FileSearchRequest) *Fi
 	resp.Total = len(resp.Files)
 	if src.FileCount > resp.Total {
 		resp.Total = src.FileCount
+	}
+	if resp.Total >= maxSearchMatches {
+		resp.Truncated = true
 	}
 	resp.Files = pageSlice(resp.Files, req.Page, req.PageSize)
 	return resp

@@ -136,14 +136,14 @@ func TestZoektServiceSearchOptionsAreSizedForRequestedPage(t *testing.T) {
 	if searcher.lastOptions == nil {
 		t.Fatal("expected search options")
 	}
-	if searcher.lastOptions.ShardMaxMatchCount != 75 {
-		t.Fatalf("expected shard max match count for requested page, got %d", searcher.lastOptions.ShardMaxMatchCount)
+	if searcher.lastOptions.ShardMaxMatchCount != maxSearchMatches {
+		t.Fatalf("expected shard max match count %d, got %d", maxSearchMatches, searcher.lastOptions.ShardMaxMatchCount)
 	}
-	if searcher.lastOptions.TotalMaxMatchCount != 75 {
-		t.Fatalf("expected total max match count for requested page, got %d", searcher.lastOptions.TotalMaxMatchCount)
+	if searcher.lastOptions.TotalMaxMatchCount != maxSearchMatches {
+		t.Fatalf("expected total max match count %d, got %d", maxSearchMatches, searcher.lastOptions.TotalMaxMatchCount)
 	}
-	if searcher.lastOptions.MaxMatchDisplayCount != 75 {
-		t.Fatalf("expected max match display count for requested page, got %d", searcher.lastOptions.MaxMatchDisplayCount)
+	if searcher.lastOptions.MaxMatchDisplayCount != maxSearchMatches {
+		t.Fatalf("expected max match display count %d, got %d", maxSearchMatches, searcher.lastOptions.MaxMatchDisplayCount)
 	}
 }
 
